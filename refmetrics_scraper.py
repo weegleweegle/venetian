@@ -127,10 +127,12 @@ def login(session: requests.Session) -> bool:
                 if name:
                     payload[name] = val
 
+        log.info(f"Logging in as: {USERNAME}")
         resp = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
+        log.info(f"Login response: status={resp.status_code}, url={resp.url}")
 
         if "/login" in resp.url and resp.status_code == 200:
-            log.error("Login failed — check REFMETRICS_USERNAME / REFMETRICS_PASSWORD.")
+            log.error("Login failed — still on login page after POST.")
             return False
 
         log.info("Login successful.")
