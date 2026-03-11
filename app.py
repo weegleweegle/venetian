@@ -21,10 +21,27 @@ SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK", "")
 log = logging.getLogger(__name__)
 
 
+def _migrate_db(conn):
+    """Ensure result-tracking columns exist in game_analysis."""
+    try:
+        cursor = conn.execute("PRAGMA table_info(game_analysis)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if cols and "actual_total" not in cols:
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN actual_total REAL")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN home_score INTEGER")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN away_score INTEGER")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN result TEXT")
+            conn.commit()
+            log.info("Migrated game_analysis: added result tracking columns.")
+    except Exception:
+        pass
+
+
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
+        _migrate_db(g.db)
     return g.db
 
 
@@ -120,27 +137,34 @@ def results():
         update_game_results(db)
     except Exception as e:
         log.warning(f"Result update failed: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     # All green-card games (crew avg >= 35.5) across all dates
-    rows = db.execute("""
-        SELECT ga.*, gm.home_team, gm.away_team, gm.home_logo, gm.away_logo,
-               gm.game_date, gm.game_time, gm.network, gm.espn_game_id,
-               gm.crew_chief, gm.u1, gm.u2
-        FROM game_analysis ga
-        JOIN game_assignments gm ON ga.game_key = gm.game_key
-        WHERE ga.l1_crew_avg >= 35.5
-        ORDER BY gm.game_date DESC, gm.game_time DESC
-    """).fetchall()
-
     games = []
-    for row in rows:
-        g = dict(row)
-        if g.get("l1_ref_details"):
-            try:
-                g["l1_ref_details"] = json.loads(g["l1_ref_details"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        games.append(g)
+    try:
+        rows = db.execute("""
+            SELECT ga.*, gm.home_team, gm.away_team, gm.home_logo, gm.away_logo,
+                   gm.game_date, gm.game_time, gm.network, gm.espn_game_id,
+                   gm.crew_chief, gm.u1, gm.u2
+            FROM game_analysis ga
+            JOIN game_assignments gm ON ga.game_key = gm.game_key
+            WHERE ga.l1_crew_avg >= 35.5
+            ORDER BY gm.game_date DESC, gm.game_time DESC
+        """).fetchall()
+
+        for row in rows:
+            gd = dict(row)
+            if gd.get("l1_ref_details"):
+                try:
+                    gd["l1_ref_details"] = json.loads(gd["l1_ref_details"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            games.append(gd)
+    except Exception as e:
+        log.warning(f"Results query failed: {e}")
 
     # Summary stats
     total = len(games)
