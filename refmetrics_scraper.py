@@ -116,6 +116,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
             conn.execute("DROP TABLE IF EXISTS game_assignments")
             conn.execute("DROP TABLE IF EXISTS referee_stats")
             conn.commit()
+        elif cols and "discord_notified" not in cols:
+            conn.execute("ALTER TABLE game_assignments ADD COLUMN discord_notified INTEGER DEFAULT 0")
+            conn.commit()
     except Exception:
         pass
 
@@ -137,7 +140,8 @@ def init_db(db_path: str) -> sqlite3.Connection:
             location        TEXT,
             espn_game_id    TEXT,
             game_key        TEXT UNIQUE,  -- espn_game_id or 'away@home' slug
-            assignment_src  TEXT   -- 'espn' or 'refmetrics' or 'none'
+            assignment_src  TEXT,  -- 'espn' or 'refmetrics' or 'none'
+            discord_notified INTEGER DEFAULT 0
         )
     """)
     conn.execute("""
@@ -555,11 +559,19 @@ def game_key(game: dict) -> str:
 
 def fuzzy_match(name_a: str, name_b: str) -> bool:
     """Loose match between team name formats."""
-    a = name_a.lower().replace(".", "").replace("-", " ").strip()
-    b = name_b.lower().replace(".", "").replace("-", " ").strip()
+    a = name_a.lower().replace(".", "").replace("-", " ").replace("'", "").strip()
+    b = name_b.lower().replace(".", "").replace("-", " ").replace("'", "").strip()
     if a in b or b in a:
         return True
+    # Compare first two words (handles "Duke" vs "Duke Blue Devils")
     if a.split()[:2] == b.split()[:2]:
+        return True
+    # Compare first word only for single-word short names (e.g. "Duke" vs "Duke Blue Devils")
+    a_words = a.split()
+    b_words = b.split()
+    if len(a_words) == 1 and a_words[0] == b_words[0]:
+        return True
+    if len(b_words) == 1 and b_words[0] == a_words[0]:
         return True
     return False
 
@@ -678,6 +690,8 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_key) DO UPDATE SET
             scraped_at=excluded.scraped_at,
+            home_logo=COALESCE(NULLIF(excluded.home_logo,''), home_logo),
+            away_logo=COALESCE(NULLIF(excluded.away_logo,''), away_logo),
             crew_chief=excluded.crew_chief,
             u1=excluded.u1,
             u2=excluded.u2,
@@ -697,9 +711,17 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
         for name, url in game.get("ref_links", {}).items():
             scrape_ref_profile(name, url, session, conn, scraped_at)
 
-    # Notify Discord when refs are assigned
+    # Notify Discord when refs are assigned (only once per game)
     if game["has_assignment"]:
-        notify_discord(game)
+        already = conn.execute(
+            "SELECT discord_notified FROM game_assignments WHERE game_key = ?", (gk,)
+        ).fetchone()
+        if not already or not already["discord_notified"]:
+            notify_discord(game)
+            conn.execute(
+                "UPDATE game_assignments SET discord_notified = 1 WHERE game_key = ?", (gk,)
+            )
+            conn.commit()
 
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
