@@ -105,6 +105,7 @@ def notify_discord(game: dict):
 def init_db(db_path: str) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
 
     # Migrate: drop old table if schema is outdated (missing columns)
     try:
