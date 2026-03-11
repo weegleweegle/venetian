@@ -53,6 +53,13 @@ ESPN_SUMMARY = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/"
     "mens-college-basketball/summary?event={game_id}"
 )
+
+# The Odds API — NCAAB totals
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
+ODDS_API_URL = (
+    "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"
+    "?regions=us&markets=totals&oddsFormat=american&apiKey={api_key}"
+)
 # ──────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -788,6 +795,74 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
     ))
     conn.commit()
     log.info(f"  -> {name}  fouls/g: {stats.get('Fouls/Game', 'n/a')}")
+
+
+def fetch_odds_totals() -> dict:
+    """Fetch O/U lines from The Odds API. Returns {normalised_team_name: point}."""
+    api_key = ODDS_API_KEY
+    if not api_key:
+        return {}
+
+    try:
+        url = ODDS_API_URL.format(api_key=api_key)
+        r = requests.get(url, timeout=15)
+        data = r.json()
+        remaining = r.headers.get("x-requests-remaining", "?")
+        log.info(f"Odds API: fetched {len(data)} events ({remaining} requests remaining)")
+    except Exception as e:
+        log.warning(f"Odds API fetch failed: {e}")
+        return {}
+
+    lines = {}
+    for event in data:
+        home = event.get("home_team", "")
+        away = event.get("away_team", "")
+        # Use consensus from first bookmaker with a totals market
+        for bk in event.get("bookmakers", []):
+            for mkt in bk.get("markets", []):
+                if mkt.get("key") == "totals":
+                    for outcome in mkt.get("outcomes", []):
+                        if outcome.get("name") == "Over" and outcome.get("point"):
+                            lines[home.lower()] = outcome["point"]
+                            lines[away.lower()] = outcome["point"]
+                            break
+                    break
+            if home.lower() in lines:
+                break
+    return lines
+
+
+def update_odds(conn: sqlite3.Connection):
+    """Fetch O/U lines and populate game_analysis.ou_line for today's games."""
+    lines = fetch_odds_totals()
+    if not lines:
+        return 0
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = conn.execute("""
+        SELECT ga.game_key, gm.home_team, gm.away_team
+        FROM game_analysis ga
+        JOIN game_assignments gm ON ga.game_key = gm.game_key
+        WHERE gm.game_date = ?
+          AND (ga.ou_line IS NULL OR ga.ou_line = 0)
+    """, (today,)).fetchall()
+
+    updated = 0
+    for row in rows:
+        home = row["home_team"].lower()
+        away = row["away_team"].lower()
+        point = lines.get(home) or lines.get(away)
+        if point:
+            conn.execute(
+                "UPDATE game_analysis SET ou_line = ?, updated_at = ? WHERE game_key = ?",
+                (point, datetime.now().isoformat(timespec="seconds"), row["game_key"])
+            )
+            log.info(f"Set O/U line {point} for {row['game_key']}")
+            updated += 1
+
+    if updated:
+        conn.commit()
+    return updated
 
 
 def fetch_espn_final_score(game_id: str) -> dict | None:

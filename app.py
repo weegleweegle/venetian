@@ -57,6 +57,13 @@ def index():
     db = get_db()
     today = datetime.now().strftime("%Y-%m-%d")
 
+    # Auto-fetch O/U lines from The Odds API
+    from refmetrics_scraper import update_odds
+    try:
+        update_odds(db)
+    except Exception as e:
+        log.warning(f"Odds update failed: {e}")
+
     games = db.execute("""
         SELECT * FROM game_assignments
         WHERE game_date = ?

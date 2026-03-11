@@ -745,6 +745,9 @@
                         {% elif a.grade == 'PASS' and a.stay_away_reason %}
                             <span class="grade-badge grade-pass" title="{{ a.stay_away_reason }}">PASS</span>
                         {% endif %}
+                        {% if a.ou_line %}
+                            <span style="font-size:0.75rem;color:#60a5fa;font-weight:600;margin-left:0.5rem;">O/U {{ a.ou_line }}</span>
+                        {% endif %}
                     </div>
                     <button class="analyze-btn" onclick="togglePanel('{{ gk }}')">
                         Analyze &#9662;
