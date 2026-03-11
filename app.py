@@ -138,8 +138,12 @@ def index():
 def results():
     db = get_db()
 
-    # Auto-fetch final scores for games missing results
-    from refmetrics_scraper import update_game_results
+    # Auto-fetch O/U lines and final scores
+    from refmetrics_scraper import update_game_results, update_odds
+    try:
+        update_odds(db)
+    except Exception as e:
+        log.warning(f"Odds update failed: {e}")
     try:
         update_game_results(db)
     except Exception as e:
