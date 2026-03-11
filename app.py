@@ -7,12 +7,15 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 import threading
 
 from flask import Flask, g, render_template, jsonify, request
+
+DISPLAY_TZ = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/Chicago"))
 
 app = Flask(__name__)
 DB_PATH = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
@@ -125,10 +128,32 @@ def index():
 
     seasonal_mode = get_seasonal_mode(today)
 
+    # Determine which games are likely finished (started 3+ hours ago)
+    now_local = datetime.now(DISPLAY_TZ)
+    completed_keys = set()
+    for game in games:
+        gk = game["game_key"]
+        # If we have a final score from ESPN, it's definitely done
+        a = analyses.get(gk, {})
+        if a and a.get("actual_total"):
+            completed_keys.add(gk)
+            continue
+        # Otherwise estimate from game time
+        gt = game["game_time"]
+        if gt:
+            try:
+                game_dt = datetime.strptime(f"{today} {gt}", "%Y-%m-%d %I:%M %p")
+                game_dt = game_dt.replace(tzinfo=DISPLAY_TZ)
+                if now_local > game_dt + timedelta(hours=3):
+                    completed_keys.add(gk)
+            except (ValueError, TypeError):
+                pass
+
     return render_template("index.html",
         games=games,
         ref_stats=ref_stats,
         analyses=analyses,
+        completed_keys=completed_keys,
         seasonal_mode=seasonal_mode,
         plays_count=plays_count,
         today=today,

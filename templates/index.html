@@ -814,7 +814,7 @@
             {% for game in games %}
                 {% set gk = game.game_key %}
                 {% set a = analyses.get(gk, {}) if analyses else {} %}
-                {% if a and a.actual_total %}
+                {% if gk in completed_keys %}
                     {% set ns.completed = ns.completed + [(game, a, gk)] %}
                 {% else %}
                     {% set ns.upcoming = ns.upcoming + [(game, a, gk)] %}
