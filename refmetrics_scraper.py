@@ -41,7 +41,8 @@ TODAYS_GAMES_URL = REFMETRICS_URL + "/ncaa-men/todays-games"
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "")
-DISPLAY_TZ      = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/New_York"))
+DISPLAY_TZ      = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/Chicago"))
+REFMETRICS_TZ   = ZoneInfo("America/New_York")  # RefMetrics times are Eastern
 
 # ESPN public API — no auth required
 ESPN_SCOREBOARD = (
@@ -339,8 +340,19 @@ def fetch_refmetrics_schedule(session: requests.Session) -> list[dict]:
             continue
 
         # Columns: Time | Matchup | Crew Chief | Umpire 1 | Umpire 2 | Network | Tournament
-        time_str   = cols[0].get_text(strip=True)
+        raw_time   = cols[0].get_text(strip=True)
         matchup_td = cols[1]
+
+        # Convert RefMetrics time (Eastern) to display timezone
+        time_str = raw_time
+        try:
+            today = datetime.now().date()
+            t = datetime.strptime(raw_time, "%I:%M %p").time()
+            dt_et = datetime.combine(today, t, tzinfo=REFMETRICS_TZ)
+            dt_display = dt_et.astimezone(DISPLAY_TZ)
+            time_str = dt_display.strftime("%I:%M %p").lstrip("0")
+        except (ValueError, TypeError):
+            pass
         cc_name    = cols[2].get_text(strip=True)
         u1_name    = cols[3].get_text(strip=True)
         u2_name    = cols[4].get_text(strip=True)
