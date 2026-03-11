@@ -42,14 +42,31 @@
             letter-spacing: 0.05em;
         }
 
-        .nav-link {
-            font-size: 0.8rem;
-            color: #666;
-            text-decoration: none;
-            transition: color 0.15s;
+        /* ── NAV TABS ──────────────────────────────────────────── */
+        .nav-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #222;
         }
 
-        .nav-link:hover { color: #fff; }
+        .nav-tab {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #555;
+            text-decoration: none;
+            padding: 0.5rem 1.25rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+            letter-spacing: 0.04em;
+        }
+
+        .nav-tab:hover { color: #bbb; }
+
+        .nav-tab.active {
+            color: #fff;
+            border-bottom-color: #34d399;
+        }
 
         /* ── SUMMARY CARDS ──────────────────────────────────────── */
         .summary-bar {
@@ -279,10 +296,14 @@
         <header>
             <div class="header-left">
                 <h1>VENETIAN</h1>
-                <a href="/" class="nav-link">Today's Games</a>
             </div>
             <span style="font-size: 0.75rem; color: #34d399; font-weight: 600;">GREEN CARD RESULTS</span>
         </header>
+
+        <div class="nav-tabs">
+            <a href="/" class="nav-tab">TODAY'S GAMES</a>
+            <a href="/results" class="nav-tab active">RESULTS</a>
+        </div>
 
         <div class="summary-bar">
             <div class="summary-card">

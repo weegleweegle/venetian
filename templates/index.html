@@ -598,6 +598,32 @@
             color: #444;
             margin-bottom: 0.4rem;
         }
+
+        /* ── NAV TABS ──────────────────────────────────────────── */
+        .nav-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid #222;
+        }
+
+        .nav-tab {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #555;
+            text-decoration: none;
+            padding: 0.5rem 1.25rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+            letter-spacing: 0.04em;
+        }
+
+        .nav-tab:hover { color: #bbb; }
+
+        .nav-tab.active {
+            color: #fff;
+            border-bottom-color: #34d399;
+        }
     </style>
 </head>
 <body>
@@ -612,13 +638,17 @@
                 {% endif %}
             </div>
             <div style="display:flex;align-items:center;gap:1rem;">
-                <a href="/results" style="font-size:0.8rem;color:#34d399;text-decoration:none;font-weight:600;letter-spacing:0.04em;">RESULTS</a>
                 <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">
                     <span class="refresh-icon" style="display:inline-block;">&#8635;</span> Refresh
                 </button>
                 <span class="meta">{{ today }}</span>
             </div>
         </header>
+
+        <div class="nav-tabs">
+            <a href="/" class="nav-tab active">TODAY'S GAMES</a>
+            <a href="/results" class="nav-tab">RESULTS</a>
+        </div>
 
         <div class="stats-bar">
             <div class="stat-item">
