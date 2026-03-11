@@ -1,17 +1,17 @@
 """
-RefMetrics Scraper — with ESPN Fallback
-========================================
-1. Logs into refmetrics.com and pulls today's game schedule + ref assignments
-2. For any game missing assignments, falls back to ESPN's public API
-3. Schedules a scrape 10 minutes before each tip-off
-4. At trigger time: re-checks RefMetrics (NCAA posts late), then ESPN again
-5. Saves everything to SQLite (refmetrics.db)
+Venetian Scraper — ESPN Schedule + RefMetrics Refs
+===================================================
+1. Pulls today's game schedule from ESPN's public scoreboard API
+2. Gets referee assignments from ESPN game summaries
+3. Optionally enriches with RefMetrics referee data (if credentials set)
+4. Schedules a scrape 10 minutes before each tip-off
+5. At trigger time: re-checks for officials, saves to SQLite
 
 Requirements:
     pip install requests beautifulsoup4 apscheduler
 
 Usage:
-    1. Set REFMETRICS_USERNAME and REFMETRICS_PASSWORD env vars.
+    1. Optionally set REFMETRICS_USERNAME and REFMETRICS_PASSWORD env vars.
     2. Run: python refmetrics_scraper.py
     3. Keep it running — jobs fire automatically before each tip.
 """
@@ -21,7 +21,7 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -32,11 +32,10 @@ from apscheduler.triggers.date import DateTrigger
 USERNAME       = os.environ.get("REFMETRICS_USERNAME", "")
 PASSWORD       = os.environ.get("REFMETRICS_PASSWORD", "")
 
-BASE_URL       = "https://www.refmetrics.com"
-LOGIN_URL      = f"{BASE_URL}/login"
-HOME_URL       = BASE_URL + "/"
+REFMETRICS_URL = "https://www.refmetrics.com"
+LOGIN_URL      = f"{REFMETRICS_URL}/login"
+HOME_URL       = REFMETRICS_URL + "/"
 
-LEAGUE         = os.environ.get("LEAGUE", "ncaa-men")  # ncaa-men | ncaa-women | nba | wnba | g-league
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
 
@@ -76,7 +75,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
             u1              TEXT,
             u2              TEXT,
             network         TEXT,
-            assignment_src  TEXT   -- 'refmetrics' or 'espn' or 'none'
+            location        TEXT,
+            espn_game_id    TEXT,
+            assignment_src  TEXT   -- 'espn' or 'refmetrics' or 'none'
         )
     """)
     conn.execute("""
@@ -96,7 +97,7 @@ def init_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
-# ── SESSION / LOGIN ────────────────────────────────────────────────────────────
+# ── SESSION ───────────────────────────────────────────────────────────────────
 def create_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
@@ -109,9 +110,10 @@ def create_session() -> requests.Session:
     return s
 
 
-def login(session: requests.Session) -> bool:
+# ── REFMETRICS LOGIN (optional) ──────────────────────────────────────────────
+def login_refmetrics(session: requests.Session) -> bool:
     if not USERNAME or not PASSWORD:
-        log.error("REFMETRICS_USERNAME and REFMETRICS_PASSWORD env vars must be set.")
+        log.info("No RefMetrics credentials — skipping RefMetrics login.")
         return False
 
     try:
@@ -121,11 +123,7 @@ def login(session: requests.Session) -> bool:
         payload = {}
         form    = soup.find("form")
         if form:
-            inputs = form.find_all("input")
-            field_names = [inp.get("name", "") for inp in inputs if inp.get("name")]
-            log.info(f"Login form fields: {field_names}")
-
-            for inp in inputs:
+            for inp in form.find_all("input"):
                 name = inp.get("name")
                 if not name:
                     continue
@@ -136,138 +134,100 @@ def login(session: requests.Session) -> bool:
                 elif inp.get("type") in ("text", "email") or name.lower() in ("email", "username", "login"):
                     payload[name] = USERNAME
 
-        # Fallback if form parsing didn't set credentials
         if not any(v == USERNAME for v in payload.values()):
-            payload["email"] = USERNAME
-            payload["username"] = USERNAME
+            payload["username_or_email"] = USERNAME
         if not any(v == PASSWORD for v in payload.values()):
             payload["password"] = PASSWORD
 
-        log.info(f"Logging in as: {USERNAME}")
-        log.info(f"POST payload keys: {list(payload.keys())}")
         resp = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
-        log.info(f"Login response: status={resp.status_code}, url={resp.url}")
 
         if "/login" in resp.url and resp.status_code == 200:
-            log.error("Login failed — still on login page after POST.")
+            log.warning("RefMetrics login failed — will use ESPN only for officials.")
             return False
 
-        log.info("Login successful.")
+        log.info("RefMetrics login successful.")
         return True
 
     except requests.RequestException as e:
-        log.error(f"Login error: {e}")
+        log.warning(f"RefMetrics login error: {e}")
         return False
 
 
-# ── REFMETRICS SCHEDULE PARSER ─────────────────────────────────────────────────
-def parse_refmetrics_games(session: requests.Session) -> list[dict]:
-    """Pull today's games + ref assignments from RefMetrics home page."""
+# ── ESPN SCHEDULE (primary source) ───────────────────────────────────────────
+def fetch_espn_schedule() -> list[dict]:
+    """Pull today's NCAAB schedule from ESPN's public scoreboard API."""
+    today_str = datetime.now().strftime("%Y%m%d")
+    url = f"{ESPN_SCOREBOARD}?dates={today_str}"
+
     try:
-        r    = session.get(HOME_URL, timeout=15)
-        soup = BeautifulSoup(r.text, "html.parser")
-    except requests.RequestException as e:
-        log.error(f"Failed to fetch RefMetrics schedule: {e}")
-        return []
-
-    today = datetime.now().date()
-
-    league_label_map = {
-        "ncaa-men":   "NCAA Men's",
-        "ncaa-women": "NCAA Women's",
-        "nba":        "NBA",
-        "wnba":       "WNBA",
-        "g-league":   "G League",
-    }
-    target_label = league_label_map.get(LEAGUE, "NCAA Men's")
-
-    # Find the <table> under its <h3> heading
-    target_table = None
-    for h3 in soup.find_all("h3"):
-        if target_label.lower() in h3.get_text().lower():
-            for sibling in h3.find_next_siblings():
-                if sibling.name == "table":
-                    target_table = sibling
-                    break
-                if sibling.name == "h3":
-                    break
-
-    if target_table is None:
-        log.warning(f"Could not find game table for: {LEAGUE}")
-        return []
-
-    games = []
-    for row in target_table.find_all("tr")[1:]:
-        cols = [td.get_text(strip=True) for td in row.find_all("td")]
-        if len(cols) < 6:
-            continue
-
-        time_str   = cols[0]
-        home       = cols[1]
-        away       = cols[2]
-        crew_chief = cols[3]
-        u1         = cols[4]
-        u2         = cols[5]
-        network    = cols[6] if len(cols) > 6 else ""
-
-        # Collect ref profile links for stat scraping
-        ref_links = {}
-        for a in row.find_all("a", href=True):
-            if "referee-profile" in a["href"]:
-                ref_links[a.get_text(strip=True)] = BASE_URL + a["href"]
-
-        tipoff = parse_tipoff(time_str, today)
-        if tipoff is None:
-            continue
-
-        has_assignment = bool(crew_chief and crew_chief.strip() not in ("", "-"))
-
-        games.append({
-            "game_time_str":  time_str,
-            "tipoff":         tipoff,
-            "home":           home,
-            "away":           away,
-            "crew_chief":     crew_chief,
-            "u1":             u1,
-            "u2":             u2,
-            "network":        network,
-            "ref_links":      ref_links,
-            "has_assignment": has_assignment,
-            "assignment_src": "refmetrics" if has_assignment else None,
-            "espn_game_id":   None,
-        })
-
-    assigned = sum(1 for g in games if g["has_assignment"])
-    log.info(f"RefMetrics: {len(games)} games, {assigned} with assignments.")
-    return games
-
-
-# ── ESPN FALLBACK ──────────────────────────────────────────────────────────────
-def fetch_espn_scoreboard() -> list[dict]:
-    """Pull today's NCAAB scoreboard from ESPN's public API."""
-    try:
-        r    = requests.get(ESPN_SCOREBOARD, timeout=15)
+        r    = requests.get(url, timeout=15)
         data = r.json()
     except Exception as e:
         log.error(f"ESPN scoreboard fetch failed: {e}")
         return []
 
-    espn_games = []
+    games = []
     for event in data.get("events", []):
         game_id = event.get("id")
-        comps   = event.get("competitions", [{}])[0]
-        teams   = {
-            c["homeAway"]: c["team"]["displayName"]
-            for c in comps.get("competitors", [])
-        }
-        espn_games.append({
-            "game_id": game_id,
-            "home":    teams.get("home", ""),
-            "away":    teams.get("away", ""),
+        comp    = event.get("competitions", [{}])[0]
+
+        teams = {}
+        for c in comp.get("competitors", []):
+            teams[c["homeAway"]] = c["team"]["displayName"]
+
+        # Parse game time from ISO date string
+        date_str = comp.get("date", event.get("date", ""))
+        tipoff = None
+        time_str = ""
+        if date_str:
+            try:
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                dt_local = dt.astimezone()
+                tipoff = dt_local.replace(tzinfo=None)
+                time_str = dt_local.strftime("%-I:%M %p")
+            except (ValueError, OSError):
+                try:
+                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    dt_local = dt.astimezone()
+                    tipoff = dt_local.replace(tzinfo=None)
+                    time_str = dt_local.strftime("%I:%M %p").lstrip("0")
+                except Exception:
+                    pass
+
+        # TV network
+        network = ""
+        for broadcast in comp.get("broadcasts", []):
+            names = broadcast.get("names", [])
+            if names:
+                network = names[0]
+                break
+
+        # Venue
+        venue = comp.get("venue", {})
+        location = venue.get("fullName", "")
+        city = venue.get("address", {}).get("city", "")
+        state = venue.get("address", {}).get("state", "")
+        if city and state:
+            location = f"{location}, {city}, {state}" if location else f"{city}, {state}"
+
+        games.append({
+            "espn_game_id":   game_id,
+            "game_time_str":  time_str,
+            "tipoff":         tipoff,
+            "home":           teams.get("home", ""),
+            "away":           teams.get("away", ""),
+            "network":        network,
+            "location":       location,
+            "crew_chief":     "",
+            "u1":             "",
+            "u2":             "",
+            "has_assignment": False,
+            "assignment_src": None,
+            "ref_links":      {},
         })
 
-    log.info(f"ESPN scoreboard: {len(espn_games)} games.")
-    return espn_games
+    log.info(f"ESPN schedule: {len(games)} games today.")
+    return games
 
 
 def fetch_espn_officials(game_id: str) -> dict:
@@ -292,117 +252,14 @@ def fetch_espn_officials(game_id: str) -> dict:
     }
 
 
-def fuzzy_match(rm_name: str, espn_name: str) -> bool:
-    """Loose match between RefMetrics and ESPN team name formats."""
-    a = rm_name.lower().replace(".", "").replace("-", " ").strip()
-    b = espn_name.lower().replace(".", "").replace("-", " ").strip()
-    if a in b or b in a:
-        return True
-    # Match on first two words (handles 'Kansas State' vs 'Kansas St Wildcats')
-    if a.split()[:2] == b.split()[:2]:
-        return True
-    return False
-
-
-def enrich_with_espn(games: list[dict]) -> list[dict]:
-    """For games missing assignments, try ESPN as a fallback."""
-    missing = [g for g in games if not g["has_assignment"]]
-    if not missing:
-        log.info("All games have RefMetrics assignments — ESPN fallback skipped.")
-        return games
-
-    log.info(f"Checking ESPN for {len(missing)} unassigned game(s)...")
-    espn_games = fetch_espn_scoreboard()
-
-    for game in missing:
-        matched = next(
-            (eg for eg in espn_games
-             if fuzzy_match(game["home"], eg["home"])
-             and fuzzy_match(game["away"], eg["away"])),
-            None
-        )
-
-        if not matched:
-            log.info(f"  No ESPN match: {game['away']} @ {game['home']}")
-            continue
-
-        game["espn_game_id"] = matched["game_id"]
-        officials = fetch_espn_officials(matched["game_id"])
-
-        if officials and officials.get("crew_chief"):
-            game.update({
-                "crew_chief":     officials["crew_chief"],
-                "u1":             officials.get("u1", ""),
-                "u2":             officials.get("u2", ""),
-                "has_assignment": True,
-                "assignment_src": "espn",
-            })
-            log.info(
-                f"  ESPN: {game['away']} @ {game['home']} -> "
-                f"{officials['crew_chief']} / {officials.get('u1','')} / {officials.get('u2','')}"
-            )
-        else:
-            log.info(f"  ESPN has no officials yet: {game['away']} @ {game['home']}")
-
-    return games
-
-
-# ── TIME PARSING ───────────────────────────────────────────────────────────────
-def parse_tipoff(time_str: str, date) -> datetime | None:
-    clean = (
-        time_str.upper()
-        .replace(" PT", "").replace(" ET", "")
-        .replace(" CT", "").replace(" MT", "")
-        .strip()
-    )
-    for fmt in ("%I:%M %p", "%I:%M%p"):
-        try:
-            t = datetime.strptime(clean, fmt)
-            return datetime.combine(date, t.time())
-        except ValueError:
-            continue
-    return None
-
-
-# ── SCRAPE JOB ─────────────────────────────────────────────────────────────────
-def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection):
-    """
-    Fires 10 min before tip.
-    Re-checks RefMetrics (assignments post late), then ESPN if still missing.
-    Saves assignment row + ref profile stats to DB.
-    """
-    log.info(f">> {game['away']} @ {game['home']}  ({game['game_time_str']})")
-
-    # Re-check RefMetrics — NCAA assignments often post within 30 min of tip
-    fresh_games = parse_refmetrics_games(session)
-    for fg in fresh_games:
-        if fuzzy_match(game["home"], fg["home"]) and fuzzy_match(game["away"], fg["away"]):
-            if fg["has_assignment"]:
-                log.info("  RefMetrics assignment now posted — using fresh data.")
-                game.update({
-                    "crew_chief":     fg["crew_chief"],
-                    "u1":             fg["u1"],
-                    "u2":             fg["u2"],
-                    "ref_links":      fg["ref_links"],
-                    "has_assignment": True,
-                    "assignment_src": "refmetrics",
-                })
-            break
-
-    # Still missing — one more ESPN check
-    if not game["has_assignment"]:
-        log.info("  Still no assignment — trying ESPN...")
-        espn_id = game.get("espn_game_id")
-        if not espn_id:
-            # Try to find game_id now
-            for eg in fetch_espn_scoreboard():
-                if fuzzy_match(game["home"], eg["home"]) and fuzzy_match(game["away"], eg["away"]):
-                    espn_id = eg["game_id"]
-                    game["espn_game_id"] = espn_id
-                    break
-
-        if espn_id:
-            officials = fetch_espn_officials(espn_id)
+# ── ENRICH WITH OFFICIALS ────────────────────────────────────────────────────
+def enrich_with_officials(games: list[dict], session: requests.Session,
+                          has_refmetrics: bool) -> list[dict]:
+    """Try to get referee assignments for each game."""
+    # First pass: ESPN officials
+    for game in games:
+        if game["espn_game_id"]:
+            officials = fetch_espn_officials(game["espn_game_id"])
             if officials and officials.get("crew_chief"):
                 game.update({
                     "crew_chief":     officials["crew_chief"],
@@ -412,25 +269,137 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection)
                     "assignment_src": "espn",
                 })
 
+    espn_assigned = sum(1 for g in games if g["has_assignment"])
+    log.info(f"ESPN officials: {espn_assigned}/{len(games)} games have refs assigned.")
+
+    # Second pass: RefMetrics for any still missing
+    if has_refmetrics:
+        missing = [g for g in games if not g["has_assignment"]]
+        if missing:
+            log.info(f"Checking RefMetrics for {len(missing)} unassigned game(s)...")
+            enrich_from_refmetrics(missing, session)
+
+    return games
+
+
+def fuzzy_match(name_a: str, name_b: str) -> bool:
+    """Loose match between team name formats."""
+    a = name_a.lower().replace(".", "").replace("-", " ").strip()
+    b = name_b.lower().replace(".", "").replace("-", " ").strip()
+    if a in b or b in a:
+        return True
+    if a.split()[:2] == b.split()[:2]:
+        return True
+    return False
+
+
+def enrich_from_refmetrics(games: list[dict], session: requests.Session):
+    """Check RefMetrics for referee assignments for the given games."""
+    try:
+        r    = session.get(HOME_URL, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+    except requests.RequestException as e:
+        log.warning(f"Failed to fetch RefMetrics: {e}")
+        return
+
+    # Find NCAA Men's table
+    target_table = None
+    for h3 in soup.find_all("h3"):
+        if "ncaa men" in h3.get_text().lower():
+            for sibling in h3.find_next_siblings():
+                if sibling.name == "table":
+                    target_table = sibling
+                    break
+                if sibling.name == "h3":
+                    break
+
+    if target_table is None:
+        log.info("No RefMetrics game table found.")
+        return
+
+    for row in target_table.find_all("tr")[1:]:
+        cols = [td.get_text(strip=True) for td in row.find_all("td")]
+        if len(cols) < 6:
+            continue
+
+        rm_home       = cols[1]
+        rm_away       = cols[2]
+        rm_crew_chief = cols[3]
+        rm_u1         = cols[4]
+        rm_u2         = cols[5]
+
+        if not rm_crew_chief or rm_crew_chief.strip() in ("", "-"):
+            continue
+
+        # Match to our ESPN games
+        for game in games:
+            if game["has_assignment"]:
+                continue
+            if fuzzy_match(game["home"], rm_home) and fuzzy_match(game["away"], rm_away):
+                ref_links = {}
+                for a in row.find_all("a", href=True):
+                    if "referee-profile" in a["href"]:
+                        ref_links[a.get_text(strip=True)] = REFMETRICS_URL + a["href"]
+
+                game.update({
+                    "crew_chief":     rm_crew_chief,
+                    "u1":             rm_u1,
+                    "u2":             rm_u2,
+                    "ref_links":      ref_links,
+                    "has_assignment": True,
+                    "assignment_src": "refmetrics",
+                })
+                log.info(f"  RefMetrics: {game['away']} @ {game['home']} -> {rm_crew_chief}")
+                break
+
+
+# ── SCRAPE JOB ─────────────────────────────────────────────────────────────────
+def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
+                has_refmetrics: bool):
+    """
+    Fires 10 min before tip.
+    Re-checks ESPN for officials, then RefMetrics if still missing.
+    Saves assignment row + ref profile stats to DB.
+    """
+    log.info(f">> {game['away']} @ {game['home']}  ({game['game_time_str']})")
+
+    # Re-check ESPN officials
+    if not game["has_assignment"] and game["espn_game_id"]:
+        officials = fetch_espn_officials(game["espn_game_id"])
+        if officials and officials.get("crew_chief"):
+            game.update({
+                "crew_chief":     officials["crew_chief"],
+                "u1":             officials.get("u1", ""),
+                "u2":             officials.get("u2", ""),
+                "has_assignment": True,
+                "assignment_src": "espn",
+            })
+
+    # Re-check RefMetrics
+    if not game["has_assignment"] and has_refmetrics:
+        enrich_from_refmetrics([game], session)
+
     scraped_at = datetime.now().isoformat(timespec="seconds")
     today_str  = datetime.now().strftime("%Y-%m-%d")
 
     conn.execute("""
         INSERT INTO game_assignments
             (scraped_at, league, game_date, game_time, home_team, away_team,
-             crew_chief, u1, u2, network, assignment_src)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             crew_chief, u1, u2, network, location, espn_game_id, assignment_src)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        scraped_at, LEAGUE, today_str, game["game_time_str"],
+        scraped_at, "ncaa-men", today_str, game["game_time_str"],
         game["home"], game["away"],
         game.get("crew_chief", ""), game.get("u1", ""), game.get("u2", ""),
-        game.get("network", ""), game.get("assignment_src", "none"),
+        game.get("network", ""), game.get("location", ""),
+        game.get("espn_game_id", ""), game.get("assignment_src", "none"),
     ))
     conn.commit()
 
-    # Scrape ref profile stats from RefMetrics
-    for name, url in game.get("ref_links", {}).items():
-        scrape_ref_profile(name, url, session, conn, scraped_at)
+    # Scrape ref profile stats from RefMetrics if available
+    if has_refmetrics:
+        for name, url in game.get("ref_links", {}).items():
+            scrape_ref_profile(name, url, session, conn, scraped_at)
 
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
@@ -469,7 +438,7 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
              techs, flagrants, raw_stats_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        scraped_at, LEAGUE, name,
+        scraped_at, "ncaa-men", name,
         stats.get("Games", stats.get("Total Games", "")),
         stats.get("Fouls/Game", stats.get("Avg Fouls", "")),
         stats.get("Technicals", stats.get("Tech Fouls", "")),
@@ -483,23 +452,24 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
 # ── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     log.info("=" * 60)
-    log.info("RefMetrics Scraper  (ESPN fallback enabled)")
-    log.info(f"League: {LEAGUE}  |  Trigger: T-{MINUTES_BEFORE} min")
+    log.info("Venetian — NCAA MBB Referee Tracker")
+    log.info(f"Schedule: ESPN  |  Trigger: T-{MINUTES_BEFORE} min")
     log.info("=" * 60)
 
     conn    = init_db(DB_PATH)
     session = create_session()
 
-    if not login(session):
-        return
+    # RefMetrics login is optional — ESPN is the primary source
+    has_refmetrics = login_refmetrics(session)
 
-    games = parse_refmetrics_games(session)
+    # Get today's schedule from ESPN
+    games = fetch_espn_schedule()
     if not games:
-        log.warning("No games found. Exiting.")
+        log.warning("No games on ESPN schedule today. Exiting.")
         return
 
-    # Fill missing assignments from ESPN
-    games = enrich_with_espn(games)
+    # Get referee assignments
+    games = enrich_with_officials(games, session, has_refmetrics)
 
     scheduler = BackgroundScheduler()
     scheduler.start()
@@ -508,28 +478,35 @@ def main():
     scheduled = 0
 
     for game in games:
+        if game["tipoff"] is None:
+            log.info(f"  (no tipoff time) {game['away']} @ {game['home']}")
+            scrape_game(game, session, conn, has_refmetrics)
+            continue
+
         trigger_time = game["tipoff"] - timedelta(minutes=MINUTES_BEFORE)
 
         if trigger_time <= now:
             log.info(f"  (immediate) {game['away']} @ {game['home']}")
-            scrape_game(game, session, conn)
+            scrape_game(game, session, conn, has_refmetrics)
         else:
             scheduler.add_job(
                 scrape_game,
                 trigger=DateTrigger(run_date=trigger_time),
-                args=[game, session, conn],
+                args=[game, session, conn, has_refmetrics],
                 id=f"{game['home']}_{game['away']}".replace(" ", "_"),
                 replace_existing=True,
             )
-            src = "RM" if game["has_assignment"] and game["assignment_src"] == "refmetrics" \
-                  else "ESPN" if game["has_assignment"] else "TBD"
+            src = "ESPN" if game["has_assignment"] and game["assignment_src"] == "espn" \
+                  else "RM" if game["has_assignment"] else "TBD"
             log.info(
                 f"  [{src:6}] {game['away']} @ {game['home']}"
                 f"  -> fire at {trigger_time.strftime('%I:%M %p')}"
             )
             scheduled += 1
 
-    log.info(f"\n{scheduled} games scheduled. Press Ctrl+C to stop.\n")
+    assigned = sum(1 for g in games if g["has_assignment"])
+    log.info(f"\n{len(games)} games, {assigned} with officials, {scheduled} scheduled.")
+    log.info("Waiting for scheduled jobs...\n")
 
     try:
         while True:

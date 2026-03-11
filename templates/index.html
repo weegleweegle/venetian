@@ -276,6 +276,9 @@
                         {% endif %}
                     </div>
                 </div>
+                {% if game.location %}
+                <div class="location" style="font-size:0.75rem;color:#444;margin-bottom:0.4rem;">{{ game.location }}</div>
+                {% endif %}
                 {% if game.crew_chief %}
                 <div class="crew">
                     {% if game.crew_chief %}
