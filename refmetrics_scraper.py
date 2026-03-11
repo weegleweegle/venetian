@@ -22,6 +22,7 @@ import os
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -40,6 +41,7 @@ TODAYS_GAMES_URL = REFMETRICS_URL + "/ncaa-men/todays-games"
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "")
+DISPLAY_TZ      = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/New_York"))
 
 # ESPN public API — no auth required
 ESPN_SCOREBOARD = (
@@ -246,17 +248,11 @@ def fetch_espn_schedule() -> list[dict]:
         if date_str:
             try:
                 dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                dt_local = dt.astimezone()
+                dt_local = dt.astimezone(DISPLAY_TZ)
                 tipoff = dt_local.replace(tzinfo=None)
-                time_str = dt_local.strftime("%-I:%M %p")
-            except (ValueError, OSError):
-                try:
-                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    dt_local = dt.astimezone()
-                    tipoff = dt_local.replace(tzinfo=None)
-                    time_str = dt_local.strftime("%I:%M %p").lstrip("0")
-                except Exception:
-                    pass
+                time_str = dt_local.strftime("%I:%M %p").lstrip("0")
+            except Exception:
+                pass
 
         # TV network
         network = ""
