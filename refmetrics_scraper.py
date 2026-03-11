@@ -35,6 +35,7 @@ PASSWORD       = os.environ.get("REFMETRICS_PASSWORD", "")
 REFMETRICS_URL = "https://www.refmetrics.com"
 LOGIN_URL      = f"{REFMETRICS_URL}/login"
 HOME_URL       = REFMETRICS_URL + "/"
+TODAYS_GAMES_URL = REFMETRICS_URL + "/ncaa-men/todays-games"
 
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
@@ -317,13 +318,98 @@ def fetch_espn_officials(game_id: str) -> dict:
     }
 
 
+# ── REFMETRICS TODAY'S GAMES (public, no login needed) ───────────────────────
+def enrich_from_todays_games(games: list[dict], session: requests.Session):
+    """Scrape refmetrics.com/ncaa-men/todays-games for referee assignments.
+    This page is updated before other sources."""
+    try:
+        r = session.get(TODAYS_GAMES_URL, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+    except requests.RequestException as e:
+        log.warning(f"Failed to fetch RefMetrics today's games: {e}")
+        return
+
+    table = soup.find("table")
+    if not table:
+        log.info("No table found on RefMetrics today's games page.")
+        return
+
+    rows = table.find_all("tr")[1:]  # skip header
+    matched = 0
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) < 5:
+            continue
+
+        # Columns: Time | Matchup | Crew Chief | Umpire 1 | Umpire 2 | Network | Tournament
+        matchup_td = cols[1]
+        cc_td      = cols[2]
+        u1_td      = cols[3]
+        u2_td      = cols[4]
+
+        cc_name = cc_td.get_text(strip=True)
+        u1_name = u1_td.get_text(strip=True)
+        u2_name = u2_td.get_text(strip=True)
+
+        # Skip if no real assignment
+        if not cc_name or cc_name.upper() == "TBD":
+            continue
+
+        # Parse matchup: "Away @ Home" (team names are in <strong> tags)
+        strong_tags = matchup_td.find_all("strong")
+        if len(strong_tags) >= 2:
+            rm_away = strong_tags[0].get_text(strip=True)
+            rm_home = strong_tags[1].get_text(strip=True)
+        else:
+            matchup_text = matchup_td.get_text(strip=True)
+            parts = matchup_text.split("@")
+            if len(parts) != 2:
+                continue
+            rm_away = parts[0].strip()
+            rm_home = parts[1].strip()
+
+        # Collect referee profile links
+        ref_links = {}
+        for a in row.find_all("a", href=True):
+            if "referee-profile" in a["href"]:
+                href = a["href"]
+                if not href.startswith("http"):
+                    href = REFMETRICS_URL + href
+                ref_links[a.get_text(strip=True)] = href
+
+        # Match to ESPN games
+        for game in games:
+            if game["has_assignment"]:
+                continue
+            if fuzzy_match(game["home"], rm_home) and fuzzy_match(game["away"], rm_away):
+                game.update({
+                    "crew_chief":     cc_name,
+                    "u1":             u1_name if u1_name.upper() != "TBD" else "",
+                    "u2":             u2_name if u2_name.upper() != "TBD" else "",
+                    "ref_links":      ref_links,
+                    "has_assignment": True,
+                    "assignment_src": "refmetrics",
+                })
+                matched += 1
+                log.info(f"  RM today's games: {game['away']} @ {game['home']} -> {cc_name}")
+                break
+
+    log.info(f"RefMetrics today's games: matched {matched} game(s).")
+
+
 # ── ENRICH WITH OFFICIALS ────────────────────────────────────────────────────
 def enrich_with_officials(games: list[dict], session: requests.Session,
                           has_refmetrics: bool) -> list[dict]:
     """Try to get referee assignments for each game."""
-    # First pass: ESPN officials
+    # First pass: RefMetrics today's games page (updates first, no login needed)
+    enrich_from_todays_games(games, session)
+
+    rm_assigned = sum(1 for g in games if g["has_assignment"])
+    log.info(f"RefMetrics today's games: {rm_assigned}/{len(games)} games have refs assigned.")
+
+    # Second pass: ESPN officials for any still missing
     for game in games:
-        if game["espn_game_id"]:
+        if not game["has_assignment"] and game["espn_game_id"]:
             officials = fetch_espn_officials(game["espn_game_id"])
             if officials and officials.get("crew_chief"):
                 game.update({
@@ -334,14 +420,14 @@ def enrich_with_officials(games: list[dict], session: requests.Session,
                     "assignment_src": "espn",
                 })
 
-    espn_assigned = sum(1 for g in games if g["has_assignment"])
-    log.info(f"ESPN officials: {espn_assigned}/{len(games)} games have refs assigned.")
+    espn_assigned = sum(1 for g in games if g["has_assignment"]) - rm_assigned
+    log.info(f"ESPN officials: {espn_assigned} additional game(s) assigned.")
 
-    # Second pass: RefMetrics for any still missing
+    # Third pass: RefMetrics home page (login required) for any still missing
     if has_refmetrics:
         missing = [g for g in games if not g["has_assignment"]]
         if missing:
-            log.info(f"Checking RefMetrics for {len(missing)} unassigned game(s)...")
+            log.info(f"Checking RefMetrics home for {len(missing)} unassigned game(s)...")
             enrich_from_refmetrics(missing, session)
 
     return games
@@ -427,6 +513,10 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
     Saves assignment row + ref profile stats to DB.
     """
     log.info(f">> {game['away']} @ {game['home']}  ({game['game_time_str']})")
+
+    # Re-check RefMetrics today's games first
+    if not game["has_assignment"]:
+        enrich_from_todays_games([game], session)
 
     # Re-check ESPN officials
     if not game["has_assignment"] and game["espn_game_id"]:
