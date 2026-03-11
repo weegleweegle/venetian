@@ -86,6 +86,7 @@
         .game-card {
             background: #111;
             border: 1px solid #1a1a1a;
+            border-left: 3px solid #1a1a1a;
             border-radius: 8px;
             padding: 1rem 1.25rem;
             margin-bottom: 0.75rem;
@@ -94,6 +95,16 @@
 
         .game-card:hover {
             border-color: #333;
+        }
+
+        .game-card.crew-high {
+            border-left: 3px solid #34d399;
+            background: #0c1210;
+        }
+
+        .game-card.crew-high:hover {
+            border-color: #333;
+            border-left-color: #34d399;
         }
 
         .game-header {
@@ -634,7 +645,7 @@
             {% for game in games %}
             {% set gk = game.game_key %}
             {% set a = analyses.get(gk, {}) if analyses else {} %}
-            <div class="game-card" id="card-{{ gk }}">
+            <div class="game-card{{ ' crew-high' if a and a.l1_crew_avg and a.l1_crew_avg >= 35.0 else '' }}" id="card-{{ gk }}">
                 <div class="game-header">
                     <div class="matchup">
                         {% if game.away_logo %}<img class="team-logo" src="{{ game.away_logo }}" alt="">{% endif %}
