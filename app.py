@@ -4,16 +4,21 @@ Reads from the same SQLite database the scraper writes to.
 """
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
 
+import requests
 import threading
 
 from flask import Flask, g, render_template, jsonify, request
 
 app = Flask(__name__)
 DB_PATH = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
+SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK", "")
+
+log = logging.getLogger(__name__)
 
 
 def get_db():
@@ -99,6 +104,32 @@ def ref_detail(name):
 _refresh_lock = threading.Lock()
 
 
+def notify_slack(result: dict):
+    """Send a Slack message summarizing the refresh results."""
+    if not SLACK_WEBHOOK:
+        return
+
+    games = result.get("games", 0)
+    assigned = result.get("assigned", 0)
+    pending = games - assigned
+
+    text = (
+        f":basketball: *Venetian Refresh Complete*\n"
+        f"• *{games}* games today\n"
+        f"• *{assigned}* with refs assigned\n"
+        f"• *{pending}* pending"
+    )
+
+    try:
+        r = requests.post(SLACK_WEBHOOK, json={"text": text}, timeout=10)
+        if r.status_code == 200:
+            log.info("Slack notification sent")
+        else:
+            log.warning(f"Slack webhook returned {r.status_code}")
+    except Exception as e:
+        log.warning(f"Slack notification failed: {e}")
+
+
 @app.route("/api/refresh", methods=["POST"])
 def refresh():
     if not _refresh_lock.acquire(blocking=False):
@@ -107,6 +138,7 @@ def refresh():
     try:
         from refmetrics_scraper import run_refresh
         result = run_refresh(DB_PATH)
+        notify_slack(result)
         return jsonify({"status": "ok", **result})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
