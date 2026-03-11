@@ -624,6 +624,37 @@
             color: #fff;
             border-bottom-color: #34d399;
         }
+
+        /* ── COMPLETED GAMES ──────────────────────────────────────── */
+        .completed-divider {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.5rem 0 1rem;
+        }
+
+        .completed-divider::before,
+        .completed-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #222;
+        }
+
+        .completed-divider span {
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: #444;
+            letter-spacing: 0.08em;
+        }
+
+        .game-final {
+            opacity: 0.55;
+        }
+
+        .game-final:hover {
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -672,11 +703,8 @@
             {% endif %}
         </div>
 
-        {% if games %}
-            {% for game in games %}
-            {% set gk = game.game_key %}
-            {% set a = analyses.get(gk, {}) if analyses else {} %}
-            <div class="game-card{{ ' crew-high' if a and a.l1_crew_avg and a.l1_crew_avg >= 35.5 else '' }}" id="card-{{ gk }}">
+        {% macro game_card(game, a, gk, is_final=false) %}
+            <div class="game-card{{ ' crew-high' if a and a.l1_crew_avg and a.l1_crew_avg >= 35.5 else '' }}{{ ' game-final' if is_final else '' }}" id="card-{{ gk }}">
                 <div class="game-header">
                     <div class="matchup">
                         {% if game.away_logo %}<img class="team-logo" src="{{ game.away_logo }}" alt="">{% endif %}
@@ -684,8 +712,14 @@
                         <span class="at">@</span>
                         {% if game.home_logo %}<img class="team-logo" src="{{ game.home_logo }}" alt="">{% endif %}
                         {{ game.home_team }}
+                        {% if is_final and a.actual_total %}
+                            <span style="font-size:0.8rem;color:#555;font-weight:400;margin-left:0.5rem;">{{ a.away_score }}-{{ a.home_score }} ({{ a.actual_total|int }})</span>
+                        {% endif %}
                     </div>
                     <div class="game-meta">
+                        {% if is_final %}
+                            <span style="font-size:0.65rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.04em;">Final</span>
+                        {% endif %}
                         {% if game.network %}
                             <span class="network">{{ game.network }}</span>
                         {% endif %}
@@ -772,7 +806,37 @@
                 </div>
                 {% endif %}
             </div>
+        {% endmacro %}
+
+        {% if games %}
+            {# Split into upcoming and completed games #}
+            {% set ns = namespace(upcoming=[], completed=[]) %}
+            {% for game in games %}
+                {% set gk = game.game_key %}
+                {% set a = analyses.get(gk, {}) if analyses else {} %}
+                {% if a and a.actual_total %}
+                    {% set ns.completed = ns.completed + [(game, a, gk)] %}
+                {% else %}
+                    {% set ns.upcoming = ns.upcoming + [(game, a, gk)] %}
+                {% endif %}
             {% endfor %}
+
+            {% for game, a, gk in ns.upcoming %}
+                {{ game_card(game, a, gk, false) }}
+            {% endfor %}
+
+            {% if ns.completed %}
+                <div class="completed-divider">
+                    <span>COMPLETED</span>
+                </div>
+                {% for game, a, gk in ns.completed %}
+                    {{ game_card(game, a, gk, true) }}
+                {% endfor %}
+            {% endif %}
+
+            {% if not ns.upcoming and not ns.completed %}
+                <div class="empty">No games scraped for today yet.</div>
+            {% endif %}
         {% else %}
             <div class="empty">No games scraped for today yet.</div>
         {% endif %}
