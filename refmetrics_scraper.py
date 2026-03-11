@@ -118,16 +118,33 @@ def login(session: requests.Session) -> bool:
         r    = session.get(LOGIN_URL, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        payload = {"email": USERNAME, "password": PASSWORD}
+        payload = {}
         form    = soup.find("form")
         if form:
-            for hidden in form.find_all("input", {"type": "hidden"}):
-                name = hidden.get("name")
-                val  = hidden.get("value", "")
-                if name:
-                    payload[name] = val
+            inputs = form.find_all("input")
+            field_names = [inp.get("name", "") for inp in inputs if inp.get("name")]
+            log.info(f"Login form fields: {field_names}")
+
+            for inp in inputs:
+                name = inp.get("name")
+                if not name:
+                    continue
+                if inp.get("type") == "hidden":
+                    payload[name] = inp.get("value", "")
+                elif inp.get("type") == "password":
+                    payload[name] = PASSWORD
+                elif inp.get("type") in ("text", "email") or name.lower() in ("email", "username", "login"):
+                    payload[name] = USERNAME
+
+        # Fallback if form parsing didn't set credentials
+        if not any(v == USERNAME for v in payload.values()):
+            payload["email"] = USERNAME
+            payload["username"] = USERNAME
+        if not any(v == PASSWORD for v in payload.values()):
+            payload["password"] = PASSWORD
 
         log.info(f"Logging in as: {USERNAME}")
+        log.info(f"POST payload keys: {list(payload.keys())}")
         resp = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
         log.info(f"Login response: status={resp.status_code}, url={resp.url}")
 
