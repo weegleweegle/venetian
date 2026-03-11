@@ -110,6 +110,58 @@ def index():
     )
 
 
+@app.route("/results")
+def results():
+    db = get_db()
+
+    # Auto-fetch final scores for games missing results
+    from refmetrics_scraper import update_game_results
+    try:
+        update_game_results(db)
+    except Exception as e:
+        log.warning(f"Result update failed: {e}")
+
+    # All green-card games (crew avg >= 35.5) across all dates
+    rows = db.execute("""
+        SELECT ga.*, gm.home_team, gm.away_team, gm.home_logo, gm.away_logo,
+               gm.game_date, gm.game_time, gm.network, gm.espn_game_id,
+               gm.crew_chief, gm.u1, gm.u2
+        FROM game_analysis ga
+        JOIN game_assignments gm ON ga.game_key = gm.game_key
+        WHERE ga.l1_crew_avg >= 35.5
+        ORDER BY gm.game_date DESC, gm.game_time DESC
+    """).fetchall()
+
+    games = []
+    for row in rows:
+        g = dict(row)
+        if g.get("l1_ref_details"):
+            try:
+                g["l1_ref_details"] = json.loads(g["l1_ref_details"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        games.append(g)
+
+    # Summary stats
+    total = len(games)
+    with_results = [g for g in games if g.get("result")]
+    hits = sum(1 for g in with_results if g["result"] == "HIT")
+    misses = sum(1 for g in with_results if g["result"] == "MISS")
+    pushes = sum(1 for g in with_results if g["result"] == "PUSH")
+    pending = total - len(with_results)
+    win_pct = (hits / (hits + misses) * 100) if (hits + misses) > 0 else 0
+
+    return render_template("results.html",
+        games=games,
+        total=total,
+        hits=hits,
+        misses=misses,
+        pushes=pushes,
+        pending=pending,
+        win_pct=win_pct,
+    )
+
+
 @app.route("/api/ref/<name>")
 def ref_detail(name):
     db = get_db()

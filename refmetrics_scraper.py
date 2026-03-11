@@ -122,6 +122,20 @@ def init_db(db_path: str) -> sqlite3.Connection:
     except Exception:
         pass
 
+    # Migrate game_analysis: add result tracking columns
+    try:
+        cursor = conn.execute("PRAGMA table_info(game_analysis)")
+        ga_cols = {row[1] for row in cursor.fetchall()}
+        if ga_cols and "actual_total" not in ga_cols:
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN actual_total REAL")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN home_score INTEGER")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN away_score INTEGER")
+            conn.execute("ALTER TABLE game_analysis ADD COLUMN result TEXT")  # HIT, MISS, PUSH, or NULL
+            conn.commit()
+            log.info("Added result tracking columns to game_analysis.")
+    except Exception:
+        pass
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS game_assignments (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,6 +238,11 @@ def init_db(db_path: str) -> sqlite3.Connection:
             stay_away_reason    TEXT,
             grade_finalized     INTEGER DEFAULT 0,
             finalized_at        TEXT,
+
+            actual_total        REAL,
+            home_score          INTEGER,
+            away_score          INTEGER,
+            result              TEXT,
 
             created_at          TEXT,
             updated_at          TEXT
@@ -769,6 +788,88 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
     ))
     conn.commit()
     log.info(f"  -> {name}  fouls/g: {stats.get('Fouls/Game', 'n/a')}")
+
+
+def fetch_espn_final_score(game_id: str) -> dict | None:
+    """Fetch final score for a completed ESPN game. Returns None if game not final."""
+    try:
+        url = ESPN_SUMMARY.format(game_id=game_id)
+        r = requests.get(url, timeout=15)
+        data = r.json()
+    except Exception as e:
+        log.warning(f"ESPN score fetch failed for {game_id}: {e}")
+        return None
+
+    header = data.get("header", {})
+    competitions = header.get("competitions", [{}])
+    if not competitions:
+        return None
+
+    comp = competitions[0]
+    status = comp.get("status", {}).get("type", {}).get("name", "")
+    if status != "STATUS_FINAL":
+        return None
+
+    scores = {}
+    for c in comp.get("competitors", []):
+        side = c.get("homeAway", "")
+        scores[side] = int(c.get("score", 0))
+
+    home_score = scores.get("home", 0)
+    away_score = scores.get("away", 0)
+    return {
+        "home_score": home_score,
+        "away_score": away_score,
+        "actual_total": home_score + away_score,
+    }
+
+
+def update_game_results(conn: sqlite3.Connection):
+    """Fetch final scores for green-card games missing results and compute HIT/MISS."""
+    rows = conn.execute("""
+        SELECT ga.game_key, ga.ou_line, ga.signal_direction,
+               gm.espn_game_id
+        FROM game_analysis ga
+        JOIN game_assignments gm ON ga.game_key = gm.game_key
+        WHERE ga.l1_crew_avg >= 35.5
+          AND ga.actual_total IS NULL
+          AND gm.espn_game_id IS NOT NULL
+          AND gm.espn_game_id != ''
+    """).fetchall()
+
+    updated = 0
+    for row in rows:
+        score = fetch_espn_final_score(row["espn_game_id"])
+        if not score:
+            continue
+
+        actual = score["actual_total"]
+        ou_line = row["ou_line"]
+        signal = row["signal_direction"]
+
+        # Determine result
+        result = None
+        if ou_line is not None and signal:
+            if actual == ou_line:
+                result = "PUSH"
+            elif signal == "OVER":
+                result = "HIT" if actual > ou_line else "MISS"
+            elif signal == "UNDER":
+                result = "HIT" if actual < ou_line else "MISS"
+
+        conn.execute("""
+            UPDATE game_analysis
+            SET actual_total = ?, home_score = ?, away_score = ?, result = ?,
+                updated_at = ?
+            WHERE game_key = ?
+        """, (actual, score["home_score"], score["away_score"], result,
+              datetime.now().isoformat(timespec="seconds"), row["game_key"]))
+        updated += 1
+
+    if updated:
+        conn.commit()
+        log.info(f"Updated {updated} game result(s).")
+    return updated
 
 
 def save_games_to_db(games: list[dict], conn: sqlite3.Connection):

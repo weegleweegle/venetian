@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Venetian — Results</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #222;
+            padding-bottom: 1rem;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 1rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: 0.05em;
+        }
+
+        .nav-link {
+            font-size: 0.8rem;
+            color: #666;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+
+        .nav-link:hover { color: #fff; }
+
+        /* ── SUMMARY CARDS ──────────────────────────────────────── */
+        .summary-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .summary-card {
+            background: #111;
+            border: 1px solid #1a1a1a;
+            border-radius: 8px;
+            padding: 0.75rem 1.25rem;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .summary-card .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .summary-card .label {
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-top: 0.2rem;
+        }
+
+        .summary-card.hit .value { color: #34d399; }
+        .summary-card.miss .value { color: #f87171; }
+        .summary-card.push .value { color: #fbbf24; }
+        .summary-card.pct .value { color: #60a5fa; }
+
+        /* ── RESULTS TABLE ──────────────────────────────────────── */
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .results-table thead th {
+            text-align: left;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #222;
+        }
+
+        .results-table tbody tr {
+            border-bottom: 1px solid #1a1a1a;
+            transition: background 0.1s;
+        }
+
+        .results-table tbody tr:hover {
+            background: #151515;
+        }
+
+        .results-table td {
+            padding: 0.65rem 0.75rem;
+            vertical-align: middle;
+        }
+
+        .matchup-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .team-logo {
+            width: 20px;
+            height: 20px;
+            object-fit: contain;
+        }
+
+        .matchup-cell .at {
+            color: #444;
+            font-weight: 400;
+            margin: 0 0.15rem;
+        }
+
+        .matchup-cell .team {
+            color: #ddd;
+            font-weight: 500;
+        }
+
+        .date-cell {
+            color: #666;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+
+        .crew-avg-cell {
+            font-weight: 600;
+            color: #34d399;
+        }
+
+        .signal-cell {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .signal-over { color: #34d399; }
+        .signal-under { color: #f87171; }
+        .signal-neutral { color: #555; }
+
+        .line-cell {
+            color: #999;
+        }
+
+        .score-cell {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .total-cell {
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .result-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.15rem 0.5rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .result-hit { background: #0d3320; color: #34d399; }
+        .result-miss { background: #3b1010; color: #f87171; }
+        .result-push { background: #332b0d; color: #fbbf24; }
+        .result-pending { background: #1a1a1a; color: #555; }
+
+        .grade-badge {
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 0.15rem 0.45rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .grade-pass { background: #1a1a1a; color: #555; }
+        .grade-half-over { background: #0d3320; color: #34d399; }
+        .grade-full-over { background: #052e16; color: #22c55e; }
+        .grade-half-under { background: #332b0d; color: #fbbf24; }
+        .grade-full-under { background: #332b0d; color: #fbbf24; }
+
+        .layers-cell {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 1rem;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        /* ── CREW DETAIL (expandable) ──────────────────────────── */
+        .crew-detail {
+            font-size: 0.75rem;
+            color: #777;
+            padding: 0.3rem 0.75rem 0.5rem;
+            display: none;
+        }
+
+        .crew-detail.open { display: table-row; }
+
+        .crew-detail td {
+            padding: 0.3rem 0.75rem 0.6rem;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .ref-pills {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .ref-pill {
+            font-size: 0.75rem;
+            color: #999;
+        }
+
+        .ref-pill .fpg {
+            font-weight: 600;
+            color: #ccc;
+            margin-left: 0.25rem;
+        }
+
+        .ref-pill .tier {
+            font-size: 0.6rem;
+            font-weight: 600;
+            margin-left: 0.3rem;
+            padding: 0.1rem 0.3rem;
+            border-radius: 2px;
+        }
+
+        .tier-strong-high { background: #0d3320; color: #34d399; }
+        .tier-neutral { background: #1a1a1a; color: #666; }
+        .tier-strong-low { background: #3b1010; color: #f87171; }
+
+        .clickable-row { cursor: pointer; }
+
+        @media (max-width: 768px) {
+            .results-table { font-size: 0.75rem; }
+            .summary-bar { gap: 0.5rem; }
+            .summary-card { min-width: 70px; padding: 0.5rem 0.75rem; }
+            .summary-card .value { font-size: 1.2rem; }
+            .hide-mobile { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-left">
+                <h1>VENETIAN</h1>
+                <a href="/" class="nav-link">Today's Games</a>
+            </div>
+            <span style="font-size: 0.75rem; color: #34d399; font-weight: 600;">GREEN CARD RESULTS</span>
+        </header>
+
+        <div class="summary-bar">
+            <div class="summary-card">
+                <div class="value">{{ total }}</div>
+                <div class="label">Total Games</div>
+            </div>
+            <div class="summary-card hit">
+                <div class="value">{{ hits }}</div>
+                <div class="label">Hits</div>
+            </div>
+            <div class="summary-card miss">
+                <div class="value">{{ misses }}</div>
+                <div class="label">Misses</div>
+            </div>
+            <div class="summary-card push">
+                <div class="value">{{ pushes }}</div>
+                <div class="label">Pushes</div>
+            </div>
+            <div class="summary-card pct">
+                <div class="value">{{ "%.0f"|format(win_pct) }}%</div>
+                <div class="label">Win Rate</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{{ pending }}</div>
+                <div class="label">Pending</div>
+            </div>
+        </div>
+
+        {% if games %}
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Matchup</th>
+                    <th>Crew Avg</th>
+                    <th>Signal</th>
+                    <th>Grade</th>
+                    <th>O/U Line</th>
+                    <th>Score</th>
+                    <th>Total</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for g in games %}
+                <tr class="clickable-row" onclick="toggleDetail('detail-{{ loop.index }}')">
+                    <td class="date-cell">{{ g.game_date }}</td>
+                    <td>
+                        <div class="matchup-cell">
+                            {% if g.away_logo %}
+                                <img src="{{ g.away_logo }}" class="team-logo" alt="">
+                            {% endif %}
+                            <span class="team">{{ g.away_team }}</span>
+                            <span class="at">@</span>
+                            {% if g.home_logo %}
+                                <img src="{{ g.home_logo }}" class="team-logo" alt="">
+                            {% endif %}
+                            <span class="team">{{ g.home_team }}</span>
+                        </div>
+                    </td>
+                    <td class="crew-avg-cell">{{ "%.1f"|format(g.l1_crew_avg) }}</td>
+                    <td class="signal-cell signal-{{ (g.signal_direction or g.l1_signal or 'neutral')|lower }}">
+                        {{ g.signal_direction or g.l1_signal or '-' }}
+                    </td>
+                    <td>
+                        {% set grade = g.grade or 'PASS' %}
+                        {% set signal = (g.signal_direction or '')|lower %}
+                        {% if grade == 'FULL_UNIT' %}
+                            <span class="grade-badge grade-full-{{ signal or 'over' }}">FULL UNIT</span>
+                        {% elif grade == 'HALF_UNIT' %}
+                            <span class="grade-badge grade-half-{{ signal or 'over' }}">HALF UNIT</span>
+                        {% else %}
+                            <span class="grade-badge grade-pass">PASS</span>
+                        {% endif %}
+                    </td>
+                    <td class="line-cell">{{ g.ou_line if g.ou_line else '-' }}</td>
+                    <td class="score-cell">
+                        {% if g.home_score is not none and g.away_score is not none %}
+                            {{ g.away_score }}-{{ g.home_score }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="total-cell">
+                        {% if g.actual_total %}
+                            {{ g.actual_total|int }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if g.result == 'HIT' %}
+                            <span class="result-badge result-hit">HIT</span>
+                        {% elif g.result == 'MISS' %}
+                            <span class="result-badge result-miss">MISS</span>
+                        {% elif g.result == 'PUSH' %}
+                            <span class="result-badge result-push">PUSH</span>
+                        {% else %}
+                            <span class="result-badge result-pending">PENDING</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr class="crew-detail" id="detail-{{ loop.index }}">
+                    <td colspan="9">
+                        <div class="ref-pills">
+                            {% if g.l1_ref_details and g.l1_ref_details is iterable and g.l1_ref_details is not string %}
+                                {% for ref in g.l1_ref_details %}
+                                    <span class="ref-pill">
+                                        {{ ref.name }}
+                                        {% if ref.fpg %}<span class="fpg">{{ "%.1f"|format(ref.fpg) }}</span>{% endif %}
+                                        {% if ref.tier and ref.tier != 'NOT_FOUND' %}
+                                            <span class="tier tier-{{ ref.tier|lower|replace('_', '-') }}">{{ ref.tier|replace('_', ' ') }}</span>
+                                        {% endif %}
+                                    </span>
+                                {% endfor %}
+                            {% else %}
+                                <span style="color: #444;">
+                                    {{ g.crew_chief or '' }}
+                                    {% if g.u1 %} / {{ g.u1 }}{% endif %}
+                                    {% if g.u2 %} / {{ g.u2 }}{% endif %}
+                                </span>
+                            {% endif %}
+                            <span class="ref-pill" style="margin-left: auto; color: #555;">
+                                {{ g.layers_aligned or 0 }}/6 layers
+                            </span>
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            No green card games (crew avg 35.5+) found yet.
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function toggleDetail(id) {
+            const row = document.getElementById(id);
+            if (row) row.classList.toggle('open');
+        }
+    </script>
+</body>
+</html>
