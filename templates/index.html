@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Venetian</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #222;
+            padding-bottom: 1rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: 0.05em;
+        }
+
+        .meta {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+        }
+
+        .stat-item {
+            color: #888;
+        }
+
+        .stat-item strong {
+            color: #fff;
+            font-size: 1.1rem;
+        }
+
+        .game-card {
+            background: #111;
+            border: 1px solid #1a1a1a;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.15s;
+        }
+
+        .game-card:hover {
+            border-color: #333;
+        }
+
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.6rem;
+        }
+
+        .matchup {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .matchup .at {
+            color: #444;
+            margin: 0 0.35rem;
+            font-weight: 400;
+        }
+
+        .game-meta {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            font-size: 0.8rem;
+        }
+
+        .time {
+            color: #999;
+        }
+
+        .network {
+            color: #555;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .badge {
+            font-size: 0.65rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-refmetrics {
+            background: #0d3320;
+            color: #34d399;
+        }
+
+        .badge-espn {
+            background: #332b0d;
+            color: #fbbf24;
+        }
+
+        .badge-none {
+            background: #1a1a1a;
+            color: #555;
+        }
+
+        .crew {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.85rem;
+        }
+
+        .ref {
+            color: #bbb;
+            cursor: pointer;
+            transition: color 0.1s;
+        }
+
+        .ref:hover {
+            color: #fff;
+        }
+
+        .ref-role {
+            color: #555;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            margin-right: 0.3rem;
+        }
+
+        .ref-popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #151515;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 1.5rem;
+            min-width: 280px;
+            z-index: 100;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+
+        .ref-popup.active {
+            display: block;
+        }
+
+        .ref-popup h3 {
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            color: #fff;
+        }
+
+        .ref-popup .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid #1a1a1a;
+            font-size: 0.85rem;
+        }
+
+        .ref-popup .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .ref-popup .stat-label {
+            color: #666;
+        }
+
+        .ref-popup .stat-value {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .ref-popup .close-btn {
+            position: absolute;
+            top: 0.75rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: #555;
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+
+        .overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 99;
+        }
+
+        .overlay.active {
+            display: block;
+        }
+
+        .empty {
+            text-align: center;
+            color: #444;
+            padding: 4rem 0;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>VENETIAN</h1>
+            <span class="meta">{{ today }}</span>
+        </header>
+
+        <div class="stats-bar">
+            <div class="stat-item">
+                <strong>{{ total_games }}</strong> games
+            </div>
+            <div class="stat-item">
+                <strong>{{ assigned }}</strong> assigned
+            </div>
+            <div class="stat-item">
+                <strong>{{ total_games - assigned }}</strong> pending
+            </div>
+            {% if last_scrape %}
+            <div class="stat-item">
+                last scrape <strong>{{ last_scrape }}</strong>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if games %}
+            {% for game in games %}
+            <div class="game-card">
+                <div class="game-header">
+                    <div class="matchup">
+                        {{ game.away_team }}<span class="at">@</span>{{ game.home_team }}
+                    </div>
+                    <div class="game-meta">
+                        {% if game.network %}
+                            <span class="network">{{ game.network }}</span>
+                        {% endif %}
+                        <span class="time">{{ game.game_time }}</span>
+                        {% if game.assignment_src == 'refmetrics' %}
+                            <span class="badge badge-refmetrics">RefMetrics</span>
+                        {% elif game.assignment_src == 'espn' %}
+                            <span class="badge badge-espn">ESPN</span>
+                        {% else %}
+                            <span class="badge badge-none">TBD</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if game.crew_chief %}
+                <div class="crew">
+                    {% if game.crew_chief %}
+                    <span class="ref" onclick="showRef('{{ game.crew_chief }}')">
+                        <span class="ref-role">CC</span>{{ game.crew_chief }}
+                    </span>
+                    {% endif %}
+                    {% if game.u1 %}
+                    <span class="ref" onclick="showRef('{{ game.u1 }}')">
+                        <span class="ref-role">U1</span>{{ game.u1 }}
+                    </span>
+                    {% endif %}
+                    {% if game.u2 %}
+                    <span class="ref" onclick="showRef('{{ game.u2 }}')">
+                        <span class="ref-role">U2</span>{{ game.u2 }}
+                    </span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty">No games scraped for today yet.</div>
+        {% endif %}
+    </div>
+
+    <div class="overlay" id="overlay" onclick="closePopup()"></div>
+    <div class="ref-popup" id="refPopup">
+        <button class="close-btn" onclick="closePopup()">&times;</button>
+        <h3 id="refName"></h3>
+        <div id="refStats"></div>
+    </div>
+
+    <script>
+        function showRef(name) {
+            fetch('/api/ref/' + encodeURIComponent(name))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) return;
+                    document.getElementById('refName').textContent = name;
+                    const stats = data.raw_stats || {};
+                    let html = '';
+                    const priority = ['Games', 'Total Games', 'Fouls/Game', 'Avg Fouls',
+                                      'Technicals', 'Tech Fouls', 'Flagrants'];
+                    const shown = new Set();
+
+                    priority.forEach(key => {
+                        if (stats[key]) {
+                            html += `<div class="stat-row">
+                                <span class="stat-label">${key}</span>
+                                <span class="stat-value">${stats[key]}</span>
+                            </div>`;
+                            shown.add(key);
+                        }
+                    });
+
+                    Object.entries(stats).forEach(([k, v]) => {
+                        if (!shown.has(k)) {
+                            html += `<div class="stat-row">
+                                <span class="stat-label">${k}</span>
+                                <span class="stat-value">${v}</span>
+                            </div>`;
+                        }
+                    });
+
+                    if (!html) html = '<div class="stat-row"><span class="stat-label">No stats available</span></div>';
+                    document.getElementById('refStats').innerHTML = html;
+                    document.getElementById('refPopup').classList.add('active');
+                    document.getElementById('overlay').classList.add('active');
+                });
+        }
+
+        function closePopup() {
+            document.getElementById('refPopup').classList.remove('active');
+            document.getElementById('overlay').classList.remove('active');
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closePopup();
+        });
+    </script>
+</body>
+</html>
