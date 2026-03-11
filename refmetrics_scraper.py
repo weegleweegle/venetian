@@ -38,7 +38,7 @@ HOME_URL       = BASE_URL + "/"
 
 LEAGUE         = os.environ.get("LEAGUE", "ncaa-men")  # ncaa-men | ncaa-women | nba | wnba | g-league
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
-DB_PATH        = os.environ.get("DB_PATH", "/data/refmetrics.db")
+DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
 
 # ESPN public API — no auth required
 ESPN_SCOREBOARD = (
@@ -61,6 +61,7 @@ log = logging.getLogger(__name__)
 
 # ── DATABASE ───────────────────────────────────────────────────────────────────
 def init_db(db_path: str) -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS game_assignments (
