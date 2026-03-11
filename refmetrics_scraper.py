@@ -38,6 +38,7 @@ HOME_URL       = REFMETRICS_URL + "/"
 
 MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "")
 
 # ESPN public API — no auth required
 ESPN_SCOREBOARD = (
@@ -56,6 +57,44 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+# ── DISCORD NOTIFICATIONS ─────────────────────────────────────────────────────
+def notify_discord(game: dict):
+    """Send a Discord webhook when refs are assigned to a game."""
+    if not DISCORD_WEBHOOK:
+        return
+
+    crew = f"**CC** {game.get('crew_chief', '?')}"
+    if game.get("u1"):
+        crew += f"  |  **U1** {game['u1']}"
+    if game.get("u2"):
+        crew += f"  |  **U2** {game['u2']}"
+
+    embed = {
+        "title": f"{game['away']} @ {game['home']}",
+        "description": (
+            f"**{game.get('game_time_str', '')}**"
+            f"{' on ' + game['network'] if game.get('network') else ''}\n\n"
+            f"{crew}\n\n"
+            f"Source: {game.get('assignment_src', 'unknown').upper()}"
+        ),
+        "color": 0x34d399 if game.get("assignment_src") == "refmetrics" else 0xfbbf24,
+    }
+
+    if game.get("location"):
+        embed["footer"] = {"text": game["location"]}
+
+    payload = {"embeds": [embed]}
+
+    try:
+        r = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
+        if r.status_code in (200, 204):
+            log.info(f"Discord notification sent: {game['away']} @ {game['home']}")
+        else:
+            log.warning(f"Discord webhook returned {r.status_code}")
+    except Exception as e:
+        log.warning(f"Discord notification failed: {e}")
 
 
 # ── DATABASE ───────────────────────────────────────────────────────────────────
@@ -435,6 +474,10 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
         for name, url in game.get("ref_links", {}).items():
             scrape_ref_profile(name, url, session, conn, scraped_at)
 
+    # Notify Discord when refs are assigned
+    if game["has_assignment"]:
+        notify_discord(game)
+
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
         f"{game.get('crew_chief','?')} / {game.get('u1','?')} / {game.get('u2','?')}"
@@ -514,6 +557,33 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
 
 
 # ── MAIN ───────────────────────────────────────────────────────────────────────
+def run_refresh(db_path: str = None) -> dict:
+    """Run a full scrape cycle and return summary stats.
+    Can be called from the Flask app for manual refresh.
+    """
+    _db_path = db_path or DB_PATH
+    conn = init_db(_db_path)
+    session = create_session()
+    has_refmetrics = login_refmetrics(session)
+
+    games = fetch_espn_schedule()
+    if not games:
+        log.warning("No games on ESPN schedule today.")
+        return {"games": 0, "assigned": 0}
+
+    games = enrich_with_officials(games, session, has_refmetrics)
+    save_games_to_db(games, conn)
+
+    # Run immediate scrape for all games (re-check officials, save stats)
+    for game in games:
+        scrape_game(game, session, conn, has_refmetrics)
+
+    assigned = sum(1 for g in games if g["has_assignment"])
+    conn.close()
+    log.info(f"Manual refresh complete: {len(games)} games, {assigned} assigned.")
+    return {"games": len(games), "assigned": assigned}
+
+
 def main():
     log.info("=" * 60)
     log.info("Venetian — NCAA MBB Referee Tracker")

@@ -8,7 +8,9 @@ import os
 import sqlite3
 from datetime import datetime
 
-from flask import Flask, g, render_template, jsonify
+import threading
+
+from flask import Flask, g, render_template, jsonify, request
 
 app = Flask(__name__)
 DB_PATH = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
@@ -92,6 +94,24 @@ def ref_detail(name):
     if data.get("raw_stats_json"):
         data["raw_stats"] = json.loads(data["raw_stats_json"])
     return jsonify(data)
+
+
+_refresh_lock = threading.Lock()
+
+
+@app.route("/api/refresh", methods=["POST"])
+def refresh():
+    if not _refresh_lock.acquire(blocking=False):
+        return jsonify({"status": "already_running"}), 409
+
+    try:
+        from refmetrics_scraper import run_refresh
+        result = run_refresh(DB_PATH)
+        return jsonify({"status": "ok", **result})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        _refresh_lock.release()
 
 
 if __name__ == "__main__":

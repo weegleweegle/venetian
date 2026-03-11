@@ -238,13 +238,49 @@
             padding: 4rem 0;
             font-size: 0.9rem;
         }
+
+        .refresh-btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #999;
+            font-size: 0.8rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.15s;
+            letter-spacing: 0.03em;
+        }
+
+        .refresh-btn:hover {
+            border-color: #555;
+            color: #fff;
+        }
+
+        .refresh-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .refresh-btn.spinning .refresh-icon {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>VENETIAN</h1>
-            <span class="meta">{{ today }}</span>
+            <div style="display:flex;align-items:center;gap:1rem;">
+                <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">
+                    <span class="refresh-icon" style="display:inline-block;">&#8635;</span> Refresh
+                </button>
+                <span class="meta">{{ today }}</span>
+            </div>
         </header>
 
         <div class="stats-bar">
@@ -372,6 +408,39 @@
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') closePopup();
         });
+
+        function doRefresh() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.classList.add('spinning');
+            btn.innerHTML = '<span class="refresh-icon" style="display:inline-block;">&#8635;</span> Scraping...';
+
+            fetch('/api/refresh', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        window.location.reload();
+                    } else if (data.status === 'already_running') {
+                        btn.innerHTML = '&#8635; Already running...';
+                        setTimeout(() => window.location.reload(), 3000);
+                    } else {
+                        btn.innerHTML = '&#8635; Error';
+                        setTimeout(() => {
+                            btn.disabled = false;
+                            btn.classList.remove('spinning');
+                            btn.innerHTML = '<span class="refresh-icon" style="display:inline-block;">&#8635;</span> Refresh';
+                        }, 3000);
+                    }
+                })
+                .catch(() => {
+                    btn.innerHTML = '&#8635; Failed';
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.classList.remove('spinning');
+                        btn.innerHTML = '<span class="refresh-icon" style="display:inline-block;">&#8635;</span> Refresh';
+                    }, 3000);
+                });
+        }
     </script>
 </body>
 </html>
