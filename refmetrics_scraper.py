@@ -62,6 +62,19 @@ log = logging.getLogger(__name__)
 def init_db(db_path: str) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
+
+    # Migrate: drop old table if schema is outdated (missing columns)
+    try:
+        cursor = conn.execute("PRAGMA table_info(game_assignments)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if cols and "home_logo" not in cols:
+            log.info("DB schema outdated — recreating tables.")
+            conn.execute("DROP TABLE IF EXISTS game_assignments")
+            conn.execute("DROP TABLE IF EXISTS referee_stats")
+            conn.commit()
+    except Exception:
+        pass
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS game_assignments (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,12 +84,14 @@ def init_db(db_path: str) -> sqlite3.Connection:
             game_time       TEXT,
             home_team       TEXT,
             away_team       TEXT,
+            home_logo       TEXT,
+            away_logo       TEXT,
             crew_chief      TEXT,
             u1              TEXT,
             u2              TEXT,
             network         TEXT,
             location        TEXT,
-            espn_game_id    TEXT,
+            espn_game_id    TEXT UNIQUE,
             assignment_src  TEXT   -- 'espn' or 'refmetrics' or 'none'
         )
     """)
@@ -172,8 +187,17 @@ def fetch_espn_schedule() -> list[dict]:
         comp    = event.get("competitions", [{}])[0]
 
         teams = {}
+        logos = {}
         for c in comp.get("competitors", []):
-            teams[c["homeAway"]] = c["team"]["displayName"]
+            side = c["homeAway"]
+            teams[side] = c["team"]["displayName"]
+            logo = c["team"].get("logo", "")
+            if not logo:
+                # Try logos array
+                team_logos = c["team"].get("logos", [])
+                if team_logos:
+                    logo = team_logos[0].get("href", "")
+            logos[side] = logo
 
         # Parse game time from ISO date string
         date_str = comp.get("date", event.get("date", ""))
@@ -216,6 +240,8 @@ def fetch_espn_schedule() -> list[dict]:
             "tipoff":         tipoff,
             "home":           teams.get("home", ""),
             "away":           teams.get("away", ""),
+            "home_logo":      logos.get("home", ""),
+            "away_logo":      logos.get("away", ""),
             "network":        network,
             "location":       location,
             "crew_chief":     "",
@@ -385,11 +411,19 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
     conn.execute("""
         INSERT INTO game_assignments
             (scraped_at, league, game_date, game_time, home_team, away_team,
+             home_logo, away_logo,
              crew_chief, u1, u2, network, location, espn_game_id, assignment_src)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(espn_game_id) DO UPDATE SET
+            scraped_at=excluded.scraped_at,
+            crew_chief=excluded.crew_chief,
+            u1=excluded.u1,
+            u2=excluded.u2,
+            assignment_src=excluded.assignment_src
     """, (
         scraped_at, "ncaa-men", today_str, game["game_time_str"],
         game["home"], game["away"],
+        game.get("home_logo", ""), game.get("away_logo", ""),
         game.get("crew_chief", ""), game.get("u1", ""), game.get("u2", ""),
         game.get("network", ""), game.get("location", ""),
         game.get("espn_game_id", ""), game.get("assignment_src", "none"),
@@ -449,6 +483,36 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
     log.info(f"  -> {name}  fouls/g: {stats.get('Fouls/Game', 'n/a')}")
 
 
+def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
+    """Save all games to DB immediately so the dashboard can display them."""
+    scraped_at = datetime.now().isoformat(timespec="seconds")
+    today_str  = datetime.now().strftime("%Y-%m-%d")
+
+    for game in games:
+        conn.execute("""
+            INSERT INTO game_assignments
+                (scraped_at, league, game_date, game_time, home_team, away_team,
+                 home_logo, away_logo,
+                 crew_chief, u1, u2, network, location, espn_game_id, assignment_src)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(espn_game_id) DO UPDATE SET
+                scraped_at=excluded.scraped_at,
+                crew_chief=excluded.crew_chief,
+                u1=excluded.u1,
+                u2=excluded.u2,
+                assignment_src=excluded.assignment_src
+        """, (
+            scraped_at, "ncaa-men", today_str, game["game_time_str"],
+            game["home"], game["away"],
+            game.get("home_logo", ""), game.get("away_logo", ""),
+            game.get("crew_chief", ""), game.get("u1", ""), game.get("u2", ""),
+            game.get("network", ""), game.get("location", ""),
+            game.get("espn_game_id", ""), game.get("assignment_src", "none"),
+        ))
+    conn.commit()
+    log.info(f"Saved {len(games)} games to DB.")
+
+
 # ── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     log.info("=" * 60)
@@ -470,6 +534,9 @@ def main():
 
     # Get referee assignments
     games = enrich_with_officials(games, session, has_refmetrics)
+
+    # Save all games to DB immediately so the dashboard shows them
+    save_games_to_db(games, conn)
 
     scheduler = BackgroundScheduler()
     scheduler.start()

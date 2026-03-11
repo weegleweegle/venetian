@@ -78,9 +78,18 @@
         }
 
         .matchup {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
             font-size: 1rem;
             font-weight: 500;
             color: #fff;
+        }
+
+        .team-logo {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
         }
 
         .matchup .at {
@@ -260,7 +269,11 @@
             <div class="game-card">
                 <div class="game-header">
                     <div class="matchup">
-                        {{ game.away_team }}<span class="at">@</span>{{ game.home_team }}
+                        {% if game.away_logo %}<img class="team-logo" src="{{ game.away_logo }}" alt="">{% endif %}
+                        {{ game.away_team }}
+                        <span class="at">@</span>
+                        {% if game.home_logo %}<img class="team-logo" src="{{ game.home_logo }}" alt="">{% endif %}
+                        {{ game.home_team }}
                     </div>
                     <div class="game-meta">
                         {% if game.network %}
