@@ -29,11 +29,36 @@
             padding-bottom: 1rem;
         }
 
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 1rem;
+        }
+
         h1 {
             font-size: 1.5rem;
             font-weight: 600;
             color: #fff;
             letter-spacing: 0.05em;
+        }
+
+        .seasonal-badge {
+            font-size: 0.65rem;
+            font-weight: 600;
+            padding: 0.2rem 0.6rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .seasonal-badge.early {
+            background: #332b0d;
+            color: #fbbf24;
+        }
+
+        .seasonal-badge.late {
+            background: #0d3320;
+            color: #34d399;
         }
 
         .meta {
@@ -46,6 +71,7 @@
             gap: 2rem;
             margin-bottom: 2rem;
             font-size: 0.85rem;
+            flex-wrap: wrap;
         }
 
         .stat-item {
@@ -163,6 +189,312 @@
             margin-right: 0.3rem;
         }
 
+        /* ── CREW ANALYSIS BAR ──────────────────────────────────── */
+        .crew-analysis-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 0.6rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid #1a1a1a;
+        }
+
+        .crew-analysis-left {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.8rem;
+        }
+
+        .crew-avg {
+            color: #999;
+        }
+
+        .crew-avg strong {
+            color: #fff;
+        }
+
+        .tier-badge {
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 0.15rem 0.5rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .tier-strong-high { background: #0d3320; color: #34d399; }
+        .tier-neutral { background: #1a1a1a; color: #666; }
+        .tier-strong-low { background: #3b1010; color: #f87171; }
+        .tier-no-data { background: #1a1a1a; color: #444; }
+        .tier-mixed { background: #332b0d; color: #fbbf24; }
+
+        /* ── GRADE BADGE ────────────────────────────────────────── */
+        .grade-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.2rem 0.6rem;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            cursor: default;
+        }
+
+        .grade-pass { background: #1a1a1a; color: #555; }
+        .grade-half-over { background: #0d3320; color: #34d399; }
+        .grade-full-over { background: #052e16; color: #22c55e; }
+        .grade-half-under { background: #332b0d; color: #fbbf24; }
+        .grade-full-under { background: #332b0d; color: #fbbf24; }
+
+        .analyze-btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #888;
+            font-size: 0.7rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .analyze-btn:hover { border-color: #555; color: #fff; }
+
+        /* ── ANALYSIS PANEL ─────────────────────────────────────── */
+        .analysis-panel {
+            display: none;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #1a1a1a;
+        }
+
+        .analysis-panel.open { display: block; }
+
+        .analysis-panel.finalized { opacity: 0.7; pointer-events: none; }
+
+        .layer-section {
+            margin-bottom: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            background: #0d0d0d;
+            border-radius: 6px;
+            border: 1px solid #1a1a1a;
+        }
+
+        .layer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.4rem;
+        }
+
+        .layer-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .layer-title .auto-tag {
+            font-size: 0.6rem;
+            color: #34d399;
+            background: #0d3320;
+            padding: 0.1rem 0.3rem;
+            border-radius: 2px;
+            margin-left: 0.4rem;
+        }
+
+        .layer-title .manual-tag {
+            font-size: 0.6rem;
+            color: #fbbf24;
+            background: #332b0d;
+            padding: 0.1rem 0.3rem;
+            border-radius: 2px;
+            margin-left: 0.4rem;
+        }
+
+        .aligned-indicator {
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .aligned-yes { color: #34d399; }
+        .aligned-no { color: #555; }
+
+        .layer-body {
+            font-size: 0.8rem;
+        }
+
+        .ref-detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.2rem 0;
+            color: #bbb;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .input-group label {
+            font-size: 0.65rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        .input-group input,
+        .input-group select {
+            background: #111;
+            border: 1px solid #2a2a2a;
+            color: #e0e0e0;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            width: 90px;
+        }
+
+        .input-group input:focus,
+        .input-group select:focus {
+            outline: none;
+            border-color: #555;
+        }
+
+        .checkbox-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.3rem;
+        }
+
+        .checkbox-row label {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.78rem;
+            color: #bbb;
+            cursor: pointer;
+        }
+
+        .checkbox-row input[type="checkbox"] {
+            accent-color: #34d399;
+        }
+
+        .notes-input {
+            width: 100%;
+            background: #111;
+            border: 1px solid #2a2a2a;
+            color: #e0e0e0;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            resize: none;
+        }
+
+        .aligned-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-top: 0.3rem;
+            padding-top: 0.3rem;
+            border-top: 1px solid #1a1a1a;
+        }
+
+        .aligned-toggle label {
+            font-size: 0.7rem;
+            color: #888;
+            cursor: pointer;
+        }
+
+        /* ── SUMMARY SECTION ────────────────────────────────────── */
+        .analysis-summary {
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            background: #0d0d0d;
+            border-radius: 6px;
+            border: 1px solid #1a1a1a;
+            text-align: center;
+        }
+
+        .summary-layers {
+            font-size: 0.9rem;
+            color: #999;
+            margin-bottom: 0.4rem;
+        }
+
+        .summary-layers strong {
+            color: #fff;
+            font-size: 1.1rem;
+        }
+
+        .summary-grade {
+            font-size: 1rem;
+            font-weight: 700;
+            padding: 0.4rem 1rem;
+            border-radius: 5px;
+            display: inline-block;
+            margin: 0.5rem 0;
+        }
+
+        .summary-stay-away {
+            font-size: 0.75rem;
+            color: #f87171;
+            margin-top: 0.3rem;
+        }
+
+        .summary-seasonal {
+            font-size: 0.7rem;
+            color: #666;
+            margin-top: 0.3rem;
+        }
+
+        .under-warning {
+            background: #332b0d;
+            border: 1px solid #fbbf24;
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+            margin: 0.5rem 0;
+            font-size: 0.78rem;
+            color: #fbbf24;
+        }
+
+        .finalize-btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #999;
+            font-size: 0.8rem;
+            padding: 0.4rem 1.2rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-top: 0.5rem;
+        }
+
+        .finalize-btn:hover:not(:disabled) {
+            border-color: #34d399;
+            color: #34d399;
+        }
+
+        .finalize-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .finalize-btn.finalized {
+            border-color: #34d399;
+            color: #34d399;
+            cursor: default;
+        }
+
+        /* ── REF POPUP ──────────────────────────────────────────── */
         .ref-popup {
             display: none;
             position: fixed;
@@ -178,9 +510,7 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.6);
         }
 
-        .ref-popup.active {
-            display: block;
-        }
+        .ref-popup.active { display: block; }
 
         .ref-popup h3 {
             font-size: 1rem;
@@ -196,18 +526,9 @@
             font-size: 0.85rem;
         }
 
-        .ref-popup .stat-row:last-child {
-            border-bottom: none;
-        }
-
-        .ref-popup .stat-label {
-            color: #666;
-        }
-
-        .ref-popup .stat-value {
-            color: #fff;
-            font-weight: 500;
-        }
+        .ref-popup .stat-row:last-child { border-bottom: none; }
+        .ref-popup .stat-label { color: #666; }
+        .ref-popup .stat-value { color: #fff; font-weight: 500; }
 
         .ref-popup .close-btn {
             position: absolute;
@@ -228,9 +549,7 @@
             z-index: 99;
         }
 
-        .overlay.active {
-            display: block;
-        }
+        .overlay.active { display: block; }
 
         .empty {
             text-align: center;
@@ -251,15 +570,8 @@
             letter-spacing: 0.03em;
         }
 
-        .refresh-btn:hover {
-            border-color: #555;
-            color: #fff;
-        }
-
-        .refresh-btn:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
+        .refresh-btn:hover { border-color: #555; color: #fff; }
+        .refresh-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 
         .refresh-btn.spinning .refresh-icon {
             animation: spin 1s linear infinite;
@@ -269,12 +581,25 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        .location {
+            font-size: 0.75rem;
+            color: #444;
+            margin-bottom: 0.4rem;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>VENETIAN</h1>
+            <div class="header-left">
+                <h1>VENETIAN</h1>
+                {% if seasonal_mode %}
+                <span class="seasonal-badge {{ 'early' if seasonal_mode.mode == 'EARLY_SEASON' else 'late' }}">
+                    {{ seasonal_mode.label }}
+                </span>
+                {% endif %}
+            </div>
             <div style="display:flex;align-items:center;gap:1rem;">
                 <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">
                     <span class="refresh-icon" style="display:inline-block;">&#8635;</span> Refresh
@@ -293,6 +618,11 @@
             <div class="stat-item">
                 <strong>{{ total_games - assigned }}</strong> pending
             </div>
+            {% if plays_count is defined and plays_count > 0 %}
+            <div class="stat-item">
+                <strong>{{ plays_count }}</strong> plays
+            </div>
+            {% endif %}
             {% if last_scrape %}
             <div class="stat-item">
                 last scrape <strong>{{ last_scrape }}</strong>
@@ -302,7 +632,9 @@
 
         {% if games %}
             {% for game in games %}
-            <div class="game-card">
+            {% set gk = game.game_key %}
+            {% set a = analyses.get(gk, {}) if analyses else {} %}
+            <div class="game-card" id="card-{{ gk }}">
                 <div class="game-header">
                     <div class="matchup">
                         {% if game.away_logo %}<img class="team-logo" src="{{ game.away_logo }}" alt="">{% endif %}
@@ -326,7 +658,7 @@
                     </div>
                 </div>
                 {% if game.location %}
-                <div class="location" style="font-size:0.75rem;color:#444;margin-bottom:0.4rem;">{{ game.location }}</div>
+                <div class="location">{{ game.location }}</div>
                 {% endif %}
                 {% if game.crew_chief %}
                 <div class="crew">
@@ -346,6 +678,53 @@
                     </span>
                     {% endif %}
                 </div>
+
+                <!-- Crew Analysis Bar -->
+                {% if a and a.l1_crew_avg %}
+                <div class="crew-analysis-bar">
+                    <div class="crew-analysis-left">
+                        <span class="crew-avg">Crew Avg: <strong>{{ "%.1f"|format(a.l1_crew_avg) }}</strong></span>
+                        {% set tier_class = 'tier-strong-high' if a.l1_tier == 'STRONG_HIGH'
+                            else 'tier-strong-low' if a.l1_tier == 'STRONG_LOW'
+                            else 'tier-mixed' if a.l1_signal == 'MIXED'
+                            else 'tier-neutral' %}
+                        <span class="tier-badge {{ tier_class }}">
+                            {{ a.l1_tier|replace('_', ' ') if a.l1_tier else 'NEUTRAL' }}
+                        </span>
+                        {% if a.grade and a.grade != 'PASS' %}
+                            {% set gc = 'grade-full-over' if a.grade == 'FULL_UNIT' and a.signal_direction == 'OVER'
+                                else 'grade-half-over' if a.grade == 'HALF_UNIT' and a.signal_direction == 'OVER'
+                                else 'grade-full-under' if a.grade == 'FULL_UNIT' and a.signal_direction == 'UNDER'
+                                else 'grade-half-under' if a.grade == 'HALF_UNIT' and a.signal_direction == 'UNDER'
+                                else 'grade-pass' %}
+                            <span class="grade-badge {{ gc }}" title="{{ a.stay_away_reason or '' }}">
+                                {{ '&#9888; ' if a.signal_direction == 'UNDER' else '' }}{{ a.grade|replace('_', ' ') }} {{ a.signal_direction or '' }}
+                            </span>
+                        {% elif a.grade == 'PASS' and a.stay_away_reason %}
+                            <span class="grade-badge grade-pass" title="{{ a.stay_away_reason }}">PASS</span>
+                        {% endif %}
+                    </div>
+                    <button class="analyze-btn" onclick="togglePanel('{{ gk }}')">
+                        Analyze &#9662;
+                    </button>
+                </div>
+                {% elif game.crew_chief %}
+                <div class="crew-analysis-bar">
+                    <div class="crew-analysis-left">
+                        <span class="crew-avg" style="color:#555;">Loading analysis...</span>
+                    </div>
+                    <button class="analyze-btn" onclick="togglePanel('{{ gk }}')">
+                        Analyze &#9662;
+                    </button>
+                </div>
+                {% endif %}
+
+                <!-- Analysis Panel (collapsed) -->
+                <div class="analysis-panel {{ 'finalized' if a.grade_finalized else '' }}" id="panel-{{ gk }}">
+                    <div id="panel-content-{{ gk }}">
+                        <div style="text-align:center;color:#555;padding:1rem;">Loading...</div>
+                    </div>
+                </div>
                 {% endif %}
             </div>
             {% endfor %}
@@ -362,6 +741,447 @@
     </div>
 
     <script>
+        // ── Debounce utility ──────────────────────────────────────────
+        function debounce(fn, ms) {
+            let timer;
+            return function(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn.apply(this, args), ms);
+            };
+        }
+
+        // ── Analysis panel cache ──────────────────────────────────────
+        const panelData = {};
+
+        function togglePanel(gk) {
+            const panel = document.getElementById('panel-' + gk);
+            const isOpen = panel.classList.contains('open');
+            if (isOpen) {
+                panel.classList.remove('open');
+                return;
+            }
+            panel.classList.add('open');
+            loadPanel(gk);
+        }
+
+        function loadPanel(gk) {
+            fetch('/api/game/' + encodeURIComponent(gk) + '/analysis')
+                .then(r => r.json())
+                .then(data => {
+                    panelData[gk] = data;
+                    renderPanel(gk, data);
+                })
+                .catch(() => {
+                    document.getElementById('panel-content-' + gk).innerHTML =
+                        '<div style="color:#f87171;padding:0.5rem;">Failed to load analysis.</div>';
+                });
+        }
+
+        function renderPanel(gk, data) {
+            const el = document.getElementById('panel-content-' + gk);
+            const finalized = data.grade_finalized;
+            const dis = finalized ? 'disabled' : '';
+
+            // Parse ref details
+            let refs = data.l1_ref_details || [];
+            if (typeof refs === 'string') {
+                try { refs = JSON.parse(refs); } catch(e) { refs = []; }
+            }
+
+            let html = '';
+
+            // O/U Line
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">O/U Line</span>
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Opening Line</label>
+                        <input type="number" step="0.5" id="ou_line_${gk}"
+                            value="${data.ou_line || ''}" ${dis}
+                            onchange="saveField('${gk}', 'ou_line', this.value)">
+                    </div>
+                </div>
+            </div>`;
+
+            // Layer 1 — Ref Pedigree (AUTO)
+            let refRows = refs.map(r => {
+                let tierCls = r.tier === 'STRONG_HIGH' ? 'tier-strong-high'
+                    : r.tier === 'STRONG_LOW' ? 'tier-strong-low'
+                    : r.tier === 'NOT_FOUND' ? 'tier-no-data' : 'tier-neutral';
+                return `<div class="ref-detail-row">
+                    <span>${r.name}</span>
+                    <span>
+                        ${r.fpg !== null ? r.fpg.toFixed(1) : 'N/A'}
+                        <span class="tier-badge ${tierCls}" style="margin-left:0.3rem;">${(r.tier || '').replace('_', ' ')}</span>
+                    </span>
+                </div>`;
+            }).join('');
+
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 1 — Ref Pedigree <span class="auto-tag">AUTO</span></span>
+                    <span class="aligned-indicator ${data.l1_aligned ? 'aligned-yes' : 'aligned-no'}">
+                        ${data.l1_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="layer-body">
+                    ${refRows}
+                    <div class="ref-detail-row" style="margin-top:0.3rem;border-top:1px solid #1a1a1a;padding-top:0.3rem;">
+                        <span style="color:#fff;font-weight:600;">Crew Average</span>
+                        <span style="color:#fff;font-weight:600;">${data.l1_crew_avg ? data.l1_crew_avg.toFixed(1) : 'N/A'}</span>
+                    </div>
+                    <div class="ref-detail-row">
+                        <span>Signal</span>
+                        <span style="color:${data.l1_signal === 'OVER' ? '#34d399' : data.l1_signal === 'UNDER' ? '#fbbf24' : '#666'};">
+                            ${data.l1_signal || 'NEUTRAL'}
+                        </span>
+                    </div>
+                    <div class="ref-detail-row">
+                        <span>Strong High / Low anchors</span>
+                        <span>${data.l1_strong_high_count || 0} / ${data.l1_strong_low_count || 0}</span>
+                    </div>
+                </div>
+            </div>`;
+
+            // Layer 2 — Team Foul Profile (MANUAL)
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 2 — Team Foul Profile <span class="manual-tag">MANUAL</span></span>
+                    <span class="aligned-indicator ${data.l2_aligned ? 'aligned-yes' : 'aligned-no'}" id="l2ind_${gk}">
+                        ${data.l2_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Home Fouls/G</label>
+                        <input type="number" step="0.1" value="${data.l2_home_fouls_pg || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_home_fouls_pg', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Away Fouls/G</label>
+                        <input type="number" step="0.1" value="${data.l2_away_fouls_pg || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_away_fouls_pg', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Home FTR</label>
+                        <input type="number" step="0.01" value="${data.l2_home_ftr || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_home_ftr', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Away FTR</label>
+                        <input type="number" step="0.01" value="${data.l2_away_ftr || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_away_ftr', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Home FTA/G</label>
+                        <input type="number" step="0.1" value="${data.l2_home_fta_pg || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_home_fta_pg', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Away FTA/G</label>
+                        <input type="number" step="0.1" value="${data.l2_away_fta_pg || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l2_away_fta_pg', this.value)">
+                    </div>
+                </div>
+                <div class="aligned-toggle">
+                    <input type="checkbox" id="l2a_${gk}" ${data.l2_aligned ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l2_aligned', this.checked ? 1 : 0)">
+                    <label for="l2a_${gk}">Layer supports signal</label>
+                </div>
+            </div>`;
+
+            // Layer 3 — Pace & Scoring (AUTO)
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 3 — Pace & Scoring <span class="auto-tag">AUTO</span></span>
+                    <span class="aligned-indicator ${data.l3_aligned ? 'aligned-yes' : 'aligned-no'}" id="l3ind_${gk}">
+                        ${data.l3_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Combined PPG</label>
+                        <input type="number" step="0.1" id="ppg_${gk}" value="${data.l3_combined_ppg || ''}" ${dis}
+                            onchange="saveField('${gk}', 'l3_combined_ppg', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Pace</label>
+                        <select id="pace_${gk}" ${dis}
+                            onchange="saveField('${gk}', 'l3_pace_rating', this.value)">
+                            <option value="">--</option>
+                            <option value="FAST" ${data.l3_pace_rating === 'FAST' ? 'selected' : ''}>Fast</option>
+                            <option value="AVERAGE" ${data.l3_pace_rating === 'AVERAGE' ? 'selected' : ''}>Average</option>
+                            <option value="SLOW" ${data.l3_pace_rating === 'SLOW' ? 'selected' : ''}>Slow</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>PPG vs Line</label>
+                        <input type="text" value="${data.l3_ppg_vs_line || '—'}" disabled
+                            style="color:${data.l3_ppg_vs_line === 'ABOVE' ? '#34d399' : data.l3_ppg_vs_line === 'BELOW_10' ? '#f87171' : '#888'};">
+                    </div>
+                </div>
+            </div>`;
+
+            // Layer 4 — Player Matchups (MANUAL)
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 4 — Player Matchups <span class="manual-tag">MANUAL</span></span>
+                    <span class="aligned-indicator ${data.l4_aligned ? 'aligned-yes' : 'aligned-no'}" id="l4ind_${gk}">
+                        ${data.l4_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="checkbox-row">
+                    <label><input type="checkbox" ${data.l4_has_18ppg_scorer ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l4_has_18ppg_scorer', this.checked ? 1 : 0)"> 18+ PPG scorer</label>
+                    <label><input type="checkbox" ${data.l4_has_foul_drawer ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l4_has_foul_drawer', this.checked ? 1 : 0)"> Foul-drawer</label>
+                    <label><input type="checkbox" ${data.l4_has_3pt_volume ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l4_has_3pt_volume', this.checked ? 1 : 0)"> 3PT volume (2.5+/g)</label>
+                </div>
+                <input type="text" class="notes-input" placeholder="Player notes..."
+                    value="${data.l4_notes || ''}" ${dis}
+                    onchange="saveField('${gk}', 'l4_notes', this.value)">
+                <div class="aligned-toggle">
+                    <input type="checkbox" id="l4a_${gk}" ${data.l4_aligned ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l4_aligned', this.checked ? 1 : 0)">
+                    <label for="l4a_${gk}">Layer supports signal</label>
+                </div>
+            </div>`;
+
+            // Layer 5 — Coaching Style (MANUAL)
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 5 — Coaching Style <span class="manual-tag">MANUAL</span></span>
+                    <span class="aligned-indicator ${data.l5_aligned ? 'aligned-yes' : 'aligned-no'}" id="l5ind_${gk}">
+                        ${data.l5_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="checkbox-row">
+                    <label><input type="checkbox" ${data.l5_pressing_defense ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l5_pressing_defense', this.checked ? 1 : 0)"> Pressing defense</label>
+                    <label><input type="checkbox" ${data.l5_attack_basket ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l5_attack_basket', this.checked ? 1 : 0)"> Attack basket</label>
+                    <label><input type="checkbox" ${data.l5_slow_methodical ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l5_slow_methodical', this.checked ? 1 : 0)"> Slow methodical</label>
+                </div>
+                <input type="text" class="notes-input" placeholder="Coaching notes..."
+                    value="${data.l5_notes || ''}" ${dis}
+                    onchange="saveField('${gk}', 'l5_notes', this.value)">
+                <div class="aligned-toggle">
+                    <input type="checkbox" id="l5a_${gk}" ${data.l5_aligned ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l5_aligned', this.checked ? 1 : 0)">
+                    <label for="l5a_${gk}">Layer supports signal</label>
+                </div>
+            </div>`;
+
+            // Layer 6 — Venue & Situational (MANUAL)
+            html += `
+            <div class="layer-section">
+                <div class="layer-header">
+                    <span class="layer-title">Layer 6 — Venue & Situational <span class="manual-tag">MANUAL</span></span>
+                    <span class="aligned-indicator ${data.l6_aligned ? 'aligned-yes' : 'aligned-no'}" id="l6ind_${gk}">
+                        ${data.l6_aligned ? '&#10003; Aligned' : '&#10007; Not aligned'}
+                    </span>
+                </div>
+                <div class="checkbox-row">
+                    <label><input type="checkbox" ${data.l6_senior_day ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_senior_day', this.checked ? 1 : 0)"> Senior Day</label>
+                    <label><input type="checkbox" ${data.l6_rivalry ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_rivalry', this.checked ? 1 : 0)"> Rivalry</label>
+                    <label><input type="checkbox" ${data.l6_tournament_impl ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_tournament_impl', this.checked ? 1 : 0)"> Tournament implications</label>
+                    <label><input type="checkbox" ${data.l6_late_season ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_late_season', this.checked ? 1 : 0)"> Late season</label>
+                    <label><input type="checkbox" ${data.l6_power_ref_midmajor ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_power_ref_midmajor', this.checked ? 1 : 0)"> Power ref / mid-major</label>
+                </div>
+                <input type="text" class="notes-input" placeholder="Situational notes..."
+                    value="${data.l6_notes || ''}" ${dis}
+                    onchange="saveField('${gk}', 'l6_notes', this.value)">
+                <div class="aligned-toggle">
+                    <input type="checkbox" id="l6a_${gk}" ${data.l6_aligned ? 'checked' : ''} ${dis}
+                        onchange="saveField('${gk}', 'l6_aligned', this.checked ? 1 : 0)">
+                    <label for="l6a_${gk}">Layer supports signal</label>
+                </div>
+            </div>`;
+
+            // Summary
+            let gradeLabel = (data.grade || 'PASS').replace('_', ' ');
+            let gradeCls = 'grade-pass';
+            if (data.grade === 'FULL_UNIT' && data.signal_direction === 'OVER') gradeCls = 'grade-full-over';
+            else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'OVER') gradeCls = 'grade-half-over';
+            else if (data.grade === 'FULL_UNIT' && data.signal_direction === 'UNDER') gradeCls = 'grade-full-under';
+            else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'UNDER') gradeCls = 'grade-half-under';
+
+            let underWarning = '';
+            if (data.l1_signal === 'UNDER' && !finalized) {
+                underWarning = `<div class="under-warning">
+                    &#9888; UNDER signal — 24% blowup rate. Requires 5-6 layers confirmed.
+                    Under plays require explicit confirmation before finalizing.
+                </div>`;
+            }
+
+            let seasonalLabel = '';
+            if (data.seasonal_mode) {
+                seasonalLabel = data.seasonal_mode.label;
+            }
+
+            let finalizeLabel = finalized ? '&#10003; Finalized' : 'Finalize & Notify';
+            let finalizeDis = finalized || (!data.grade || data.grade === 'PASS') ? 'disabled' : '';
+            let finalizeCls = finalized ? 'finalize-btn finalized' : 'finalize-btn';
+
+            html += `
+            <div class="analysis-summary">
+                <div class="summary-layers">
+                    <strong>${data.layers_aligned || 0}</strong> / 6 layers aligned
+                </div>
+                ${underWarning}
+                <div class="summary-grade ${gradeCls}">
+                    ${data.signal_direction === 'UNDER' ? '&#9888; ' : ''}${gradeLabel}${data.signal_direction ? ' ' + data.signal_direction : ''}
+                </div>
+                ${data.stay_away_reason ? `<div class="summary-stay-away">${data.stay_away_reason}</div>` : ''}
+                <div class="summary-seasonal">${seasonalLabel}</div>
+                <button class="${finalizeCls}" ${finalizeDis}
+                    onclick="finalizeGrade('${gk}')">
+                    ${finalizeLabel}
+                </button>
+            </div>`;
+
+            el.innerHTML = html;
+        }
+
+        // ── Save a single field ───────────────────────────────────────
+        const _saveTimers = {};
+        function saveField(gk, field, value) {
+            // Parse numeric values
+            if (value === '' || value === null) value = null;
+            else if (!isNaN(value) && typeof value === 'string' && field !== 'l3_pace_rating'
+                     && !field.endsWith('_notes')) {
+                value = parseFloat(value);
+            }
+
+            clearTimeout(_saveTimers[gk]);
+            _saveTimers[gk] = setTimeout(() => {
+                const body = {};
+                body[field] = value;
+                fetch('/api/game/' + encodeURIComponent(gk) + '/analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                })
+                .then(r => r.json())
+                .then(data => {
+                    panelData[gk] = data;
+                    // Update indicators without full re-render
+                    updateIndicators(gk, data);
+                    // Update card-level grade badge
+                    updateCardBadge(gk, data);
+                });
+            }, 500);
+        }
+
+        function updateIndicators(gk, data) {
+            for (let i = 2; i <= 6; i++) {
+                const ind = document.getElementById(`l${i}ind_${gk}`);
+                if (ind) {
+                    ind.className = 'aligned-indicator ' + (data[`l${i}_aligned`] ? 'aligned-yes' : 'aligned-no');
+                    ind.innerHTML = data[`l${i}_aligned`] ? '&#10003; Aligned' : '&#10007; Not aligned';
+                }
+            }
+            // Update L3 indicators
+            const l3ind = document.getElementById(`l3ind_${gk}`);
+            if (l3ind) {
+                l3ind.className = 'aligned-indicator ' + (data.l3_aligned ? 'aligned-yes' : 'aligned-no');
+                l3ind.innerHTML = data.l3_aligned ? '&#10003; Aligned' : '&#10007; Not aligned';
+            }
+            // Re-render summary section at bottom of panel
+            const panel = document.getElementById('panel-content-' + gk);
+            if (panel) {
+                const summary = panel.querySelector('.analysis-summary');
+                if (summary) {
+                    let gradeLabel = (data.grade || 'PASS').replace('_', ' ');
+                    let gradeCls = 'grade-pass';
+                    if (data.grade === 'FULL_UNIT' && data.signal_direction === 'OVER') gradeCls = 'grade-full-over';
+                    else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'OVER') gradeCls = 'grade-half-over';
+                    else if (data.grade === 'FULL_UNIT' && data.signal_direction === 'UNDER') gradeCls = 'grade-full-under';
+                    else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'UNDER') gradeCls = 'grade-half-under';
+                    let finalizeDis = (!data.grade || data.grade === 'PASS') ? 'disabled' : '';
+
+                    summary.innerHTML = `
+                        <div class="summary-layers"><strong>${data.layers_aligned || 0}</strong> / 6 layers aligned</div>
+                        <div class="summary-grade ${gradeCls}">
+                            ${data.signal_direction === 'UNDER' ? '&#9888; ' : ''}${gradeLabel}${data.signal_direction ? ' ' + data.signal_direction : ''}
+                        </div>
+                        ${data.stay_away_reason ? `<div class="summary-stay-away">${data.stay_away_reason}</div>` : ''}
+                        <div class="summary-seasonal">${data.seasonal_mode ? data.seasonal_mode.label : ''}</div>
+                        <button class="finalize-btn" ${finalizeDis}
+                            onclick="finalizeGrade('${gk}')">Finalize & Notify</button>
+                    `;
+                }
+            }
+        }
+
+        function updateCardBadge(gk, data) {
+            // Find and update the grade badge in the crew-analysis-bar
+            const card = document.getElementById('card-' + gk);
+            if (!card) return;
+            const bar = card.querySelector('.crew-analysis-left');
+            if (!bar) return;
+            let existing = bar.querySelector('.grade-badge');
+            if (existing) existing.remove();
+
+            if (data.grade && data.grade !== 'PASS') {
+                let gc = 'grade-pass';
+                if (data.grade === 'FULL_UNIT' && data.signal_direction === 'OVER') gc = 'grade-full-over';
+                else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'OVER') gc = 'grade-half-over';
+                else if (data.grade === 'FULL_UNIT' && data.signal_direction === 'UNDER') gc = 'grade-full-under';
+                else if (data.grade === 'HALF_UNIT' && data.signal_direction === 'UNDER') gc = 'grade-half-under';
+                let label = data.grade.replace('_', ' ') + ' ' + (data.signal_direction || '');
+                let prefix = data.signal_direction === 'UNDER' ? '&#9888; ' : '';
+                let span = document.createElement('span');
+                span.className = 'grade-badge ' + gc;
+                span.innerHTML = prefix + label;
+                bar.appendChild(span);
+            } else if (data.grade === 'PASS' && data.stay_away_reason) {
+                let span = document.createElement('span');
+                span.className = 'grade-badge grade-pass';
+                span.title = data.stay_away_reason;
+                span.textContent = 'PASS';
+                bar.appendChild(span);
+            }
+        }
+
+        // ── Finalize ──────────────────────────────────────────────────
+        function finalizeGrade(gk) {
+            const data = panelData[gk];
+            if (data && data.l1_signal === 'UNDER') {
+                if (!confirm('This is an UNDER play. Under signals carry a 24% blowup rate even at <32.0 threshold. Are you sure you want to finalize?')) {
+                    return;
+                }
+            }
+            fetch('/api/game/' + encodeURIComponent(gk) + '/finalize', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.status === 'finalized') {
+                        // Reload the panel as finalized (read-only)
+                        loadPanel(gk);
+                        // Mark panel as finalized
+                        document.getElementById('panel-' + gk).classList.add('finalized');
+                    } else {
+                        alert(result.error || 'Finalize failed');
+                    }
+                });
+        }
+
+        // ── Ref Popup ─────────────────────────────────────────────────
         function showRef(name) {
             fetch('/api/ref/' + encodeURIComponent(name))
                 .then(r => r.json())
@@ -409,6 +1229,7 @@
             if (e.key === 'Escape') closePopup();
         });
 
+        // ── Refresh ───────────────────────────────────────────────────
         function doRefresh() {
             const btn = document.getElementById('refreshBtn');
             btn.disabled = true;

@@ -152,7 +152,86 @@ def init_db(db_path: str) -> sqlite3.Connection:
             raw_stats_json  TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS referee_foul_leaders (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            referee_name    TEXT NOT NULL UNIQUE,
+            total_fouls     REAL,
+            home_fouls      REAL,
+            away_fouls      REAL,
+            foul_diff       REAL,
+            total_games     INTEGER,
+            fouls_per_game  REAL,
+            tier            TEXT,
+            imported_at     TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS game_analysis (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_key            TEXT NOT NULL UNIQUE,
+            ou_line             REAL,
+
+            l1_crew_avg         REAL,
+            l1_tier             TEXT,
+            l1_strong_high_count INTEGER,
+            l1_strong_low_count INTEGER,
+            l1_signal           TEXT,
+            l1_ref_details      TEXT,
+            l1_aligned          INTEGER DEFAULT 0,
+
+            l2_home_fouls_pg    REAL,
+            l2_away_fouls_pg    REAL,
+            l2_home_ftr         REAL,
+            l2_away_ftr         REAL,
+            l2_home_fta_pg      REAL,
+            l2_away_fta_pg      REAL,
+            l2_aligned          INTEGER DEFAULT 0,
+
+            l3_combined_ppg     REAL,
+            l3_pace_rating      TEXT,
+            l3_ppg_vs_line      TEXT,
+            l3_aligned          INTEGER DEFAULT 0,
+
+            l4_has_18ppg_scorer     INTEGER DEFAULT 0,
+            l4_has_foul_drawer      INTEGER DEFAULT 0,
+            l4_has_3pt_volume       INTEGER DEFAULT 0,
+            l4_notes                TEXT,
+            l4_aligned              INTEGER DEFAULT 0,
+
+            l5_pressing_defense     INTEGER DEFAULT 0,
+            l5_attack_basket        INTEGER DEFAULT 0,
+            l5_slow_methodical      INTEGER DEFAULT 0,
+            l5_notes                TEXT,
+            l5_aligned              INTEGER DEFAULT 0,
+
+            l6_senior_day           INTEGER DEFAULT 0,
+            l6_rivalry              INTEGER DEFAULT 0,
+            l6_tournament_impl      INTEGER DEFAULT 0,
+            l6_late_season          INTEGER DEFAULT 0,
+            l6_power_ref_midmajor   INTEGER DEFAULT 0,
+            l6_notes                TEXT,
+            l6_aligned              INTEGER DEFAULT 0,
+
+            layers_aligned      INTEGER DEFAULT 0,
+            signal_direction    TEXT,
+            grade               TEXT,
+            stay_away_reason    TEXT,
+            grade_finalized     INTEGER DEFAULT 0,
+            finalized_at        TEXT,
+
+            created_at          TEXT,
+            updated_at          TEXT
+        )
+    """)
     conn.commit()
+
+    # Import referee CSV if table is empty
+    from analysis import import_csv
+    count = conn.execute("SELECT COUNT(*) FROM referee_foul_leaders").fetchone()[0]
+    if count == 0:
+        import_csv(conn)
+
     return conn
 
 
@@ -703,6 +782,36 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
         ))
     conn.commit()
     log.info(f"Saved {len(games)} games to DB.")
+
+    # Auto-score Layer 1 for games with 2+ refs assigned
+    from analysis import score_layer_1
+    for game in games:
+        if not game.get("has_assignment"):
+            continue
+        gk = game_key(game)
+        existing = conn.execute(
+            "SELECT id FROM game_analysis WHERE game_key = ?", (gk,)
+        ).fetchone()
+        if existing:
+            continue
+        cc = game.get("crew_chief", "")
+        u1_name = game.get("u1", "")
+        u2_name = game.get("u2", "")
+        ref_count = sum(1 for n in [cc, u1_name, u2_name] if n and n.strip())
+        if ref_count < 2:
+            continue
+        l1 = score_layer_1(conn, cc, u1_name, u2_name)
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute("""
+            INSERT INTO game_analysis
+                (game_key, l1_crew_avg, l1_tier, l1_strong_high_count,
+                 l1_strong_low_count, l1_signal, l1_ref_details, l1_aligned,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (gk, l1["l1_crew_avg"], l1["l1_tier"], l1["l1_strong_high_count"],
+              l1["l1_strong_low_count"], l1["l1_signal"], l1["l1_ref_details"],
+              l1["l1_aligned"], now, now))
+    conn.commit()
 
 
 # ── MAIN ───────────────────────────────────────────────────────────────────────
