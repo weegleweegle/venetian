@@ -319,7 +319,7 @@ def login_refmetrics(session: requests.Session) -> bool:
 def fetch_espn_schedule() -> list[dict]:
     """Pull today's NCAAB schedule from ESPN's public scoreboard API."""
     today_str = datetime.now().strftime("%Y%m%d")
-    url = f"{ESPN_SCOREBOARD}?dates={today_str}"
+    url = f"{ESPN_SCOREBOARD}?dates={today_str}&groups=50&limit=200"
 
     try:
         r    = requests.get(url, timeout=15)
@@ -824,8 +824,63 @@ def fetch_espn_final_score(game_id: str) -> dict | None:
     }
 
 
+def _backfill_espn_ids(conn: sqlite3.Connection):
+    """Find and fill missing ESPN game IDs by searching the scoreboard API."""
+    missing = conn.execute("""
+        SELECT game_key, game_date, home_team, away_team
+        FROM game_assignments
+        WHERE (espn_game_id IS NULL OR espn_game_id = '')
+          AND game_date IS NOT NULL
+    """).fetchall()
+    if not missing:
+        return
+
+    # Group by date to minimize API calls
+    dates = {}
+    for row in missing:
+        d = row["game_date"].replace("-", "")
+        dates.setdefault(d, []).append(row)
+
+    for date_str, games_needing_ids in dates.items():
+        try:
+            url = f"{ESPN_SCOREBOARD}?dates={date_str}&groups=50&limit=200"
+            r = requests.get(url, timeout=15)
+            data = r.json()
+        except Exception as e:
+            log.warning(f"ESPN scoreboard fetch for backfill failed: {e}")
+            continue
+
+        # Build lookup: normalised team name -> game_id
+        espn_games = {}
+        for event in data.get("events", []):
+            eid = event.get("id")
+            comp = event.get("competitions", [{}])[0]
+            for c in comp.get("competitors", []):
+                team_name = c["team"]["displayName"].lower()
+                espn_games[team_name] = eid
+
+        for row in games_needing_ids:
+            home = row["home_team"].lower()
+            away = row["away_team"].lower()
+            eid = espn_games.get(home) or espn_games.get(away)
+            if eid:
+                conn.execute(
+                    "UPDATE game_assignments SET espn_game_id = ? WHERE game_key = ?",
+                    (eid, row["game_key"])
+                )
+                log.info(f"Backfilled ESPN ID {eid} for {row['game_key']}")
+
+    conn.commit()
+
+
 def update_game_results(conn: sqlite3.Connection):
     """Fetch final scores for green-card games missing results and compute HIT/MISS."""
+    # First, try to backfill any missing ESPN game IDs
+    try:
+        _backfill_espn_ids(conn)
+    except Exception as e:
+        log.warning(f"ESPN ID backfill failed: {e}")
+
     rows = conn.execute("""
         SELECT ga.game_key, ga.ou_line, ga.signal_direction,
                gm.espn_game_id
