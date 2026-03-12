@@ -71,6 +71,19 @@
 - [ ] **5.9** Mobile responsiveness for analysis panel
 - [ ] **5.10** Final integration test: full game day simulation with multiple games
 
+## Phase 6: NCAA API Integration — Scores & Game State
+*Goal: Replace per-game ESPN score fetching with NCAA API scoreboard for reliable final scores and game state detection*
+
+- [x] **6.1** Add NCAA API constants and `fetch_ncaa_scoreboard(date_str)` function to scraper
+- [x] **6.2** Replace `update_game_results()` — use single NCAA scoreboard call instead of per-game ESPN summary fetches
+- [x] **6.3** Match NCAA scoreboard games to DB games by team name (fuzzy matching)
+- [x] **6.4** Use `gameState == "final"` for reliable completed game detection on home page (replace 3-hour time estimate)
+- [ ] **6.5** Store NCAA game ID in `game_assignments` for future per-game lookups
+- [x] **6.6** Update home page completed game logic in `app.py` to use `gameState` from NCAA API
+- [x] **6.7** Backfill scores for results page games that were missing ESPN IDs (no longer needed — NCAA API matches by team name, no ESPN ID required)
+- [x] **6.8** Add fallback: if NCAA API fails, fall back to ESPN summary API
+- [ ] **6.9** Test with live data: verify scores, game states, and HIT/MISS/PUSH computation
+
 ---
 
 ## Notes

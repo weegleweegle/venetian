@@ -60,6 +60,9 @@ ODDS_API_URL = (
     "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"
     "?regions=us&markets=totals&oddsFormat=american&apiKey={api_key}"
 )
+
+# NCAA API — scoreboard with scores and game state
+NCAA_API_SCOREBOARD = "https://ncaa-api.henrygd.me/scoreboard/basketball-men/d1"
 # ──────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -903,8 +906,76 @@ def update_odds(conn: sqlite3.Connection):
     return updated
 
 
+def fetch_ncaa_scoreboard(date_str: str) -> list[dict]:
+    """Fetch NCAA scoreboard for a date. Returns list of game dicts with scores and state.
+    date_str format: 'YYYY/MM/DD'
+    """
+    url = f"{NCAA_API_SCOREBOARD}/{date_str}"
+    try:
+        r = requests.get(url, timeout=15)
+        data = r.json()
+    except Exception as e:
+        log.warning(f"NCAA scoreboard fetch failed: {e}")
+        return []
+
+    games = data.get("games", [])
+    results = []
+    for g in games:
+        game = g.get("game", g)  # handle nested or flat structure
+        home = game.get("home", {})
+        away = game.get("away", {})
+        home_names = home.get("names", {})
+        away_names = away.get("names", {})
+
+        home_score_str = home.get("score", "")
+        away_score_str = away.get("score", "")
+
+        results.append({
+            "ncaa_game_id": game.get("gameID", ""),
+            "game_state": game.get("gameState", ""),  # "pre", "live", "final"
+            "home_short": home_names.get("short", ""),
+            "away_short": away_names.get("short", ""),
+            "home_seo": home_names.get("seo", ""),
+            "away_seo": away_names.get("seo", ""),
+            "home_char6": home_names.get("char6", ""),
+            "away_char6": away_names.get("char6", ""),
+            "home_score": int(home_score_str) if home_score_str else None,
+            "away_score": int(away_score_str) if away_score_str else None,
+            "start_time": game.get("startTime", ""),
+            "network": game.get("network", ""),
+        })
+    return results
+
+
+def _match_ncaa_game(db_home: str, db_away: str, ncaa_games: list[dict]) -> dict | None:
+    """Match a DB game to an NCAA scoreboard entry by team name."""
+    home_lower = db_home.lower()
+    away_lower = db_away.lower()
+
+    for g in ncaa_games:
+        ncaa_home = g["home_short"].lower()
+        ncaa_away = g["away_short"].lower()
+
+        # Exact match
+        if (home_lower == ncaa_home and away_lower == ncaa_away):
+            return g
+
+        # Substring match (handles "LSU" vs "LSU Tigers" etc)
+        home_match = (home_lower in ncaa_home or ncaa_home in home_lower or
+                      home_lower.startswith(ncaa_home.split()[0]) or
+                      ncaa_home.startswith(home_lower.split()[0]))
+        away_match = (away_lower in ncaa_away or ncaa_away in away_lower or
+                      away_lower.startswith(ncaa_away.split()[0]) or
+                      ncaa_away.startswith(away_lower.split()[0]))
+
+        if home_match and away_match:
+            return g
+
+    return None
+
+
 def fetch_espn_final_score(game_id: str) -> dict | None:
-    """Fetch final score for a completed ESPN game. Returns None if game not final."""
+    """Fetch final score for a completed ESPN game. Fallback if NCAA API fails."""
     try:
         url = ESPN_SUMMARY.format(game_id=game_id)
         r = requests.get(url, timeout=15)
@@ -937,106 +1008,77 @@ def fetch_espn_final_score(game_id: str) -> dict | None:
     }
 
 
-def _backfill_espn_ids(conn: sqlite3.Connection):
-    """Find and fill missing ESPN game IDs by searching the scoreboard API."""
-    missing = conn.execute("""
-        SELECT game_key, game_date, home_team, away_team
-        FROM game_assignments
-        WHERE (espn_game_id IS NULL OR espn_game_id = '')
-          AND game_date IS NOT NULL
-    """).fetchall()
-    if not missing:
-        return
-
-    # Group by date to minimize API calls
-    dates = {}
-    for row in missing:
-        d = row["game_date"].replace("-", "")
-        dates.setdefault(d, []).append(row)
-
-    for date_str, games_needing_ids in dates.items():
-        try:
-            url = f"{ESPN_SCOREBOARD}?dates={date_str}&groups=50&limit=200"
-            r = requests.get(url, timeout=15)
-            data = r.json()
-        except Exception as e:
-            log.warning(f"ESPN scoreboard fetch for backfill failed: {e}")
-            continue
-
-        # Build lookup: normalised team name -> game_id
-        espn_games = {}
-        for event in data.get("events", []):
-            eid = event.get("id")
-            comp = event.get("competitions", [{}])[0]
-            for c in comp.get("competitors", []):
-                team_name = c["team"]["displayName"].lower()
-                espn_games[team_name] = eid
-
-        for row in games_needing_ids:
-            home = row["home_team"].lower()
-            away = row["away_team"].lower()
-            eid = espn_games.get(home) or espn_games.get(away)
-            if eid:
-                conn.execute(
-                    "UPDATE game_assignments SET espn_game_id = ? WHERE game_key = ?",
-                    (eid, row["game_key"])
-                )
-                log.info(f"Backfilled ESPN ID {eid} for {row['game_key']}")
-
-    conn.commit()
-
-
 def update_game_results(conn: sqlite3.Connection):
-    """Fetch final scores for green-card games missing results and compute HIT/MISS."""
-    # First, try to backfill any missing ESPN game IDs
-    try:
-        _backfill_espn_ids(conn)
-    except Exception as e:
-        log.warning(f"ESPN ID backfill failed: {e}")
-
+    """Fetch final scores using NCAA API scoreboard and compute HIT/MISS/PUSH."""
+    # Get all green-card games missing results
     rows = conn.execute("""
         SELECT ga.game_key, ga.ou_line, ga.signal_direction,
-               gm.espn_game_id
+               gm.espn_game_id, gm.home_team, gm.away_team, gm.game_date
         FROM game_analysis ga
         JOIN game_assignments gm ON ga.game_key = gm.game_key
         WHERE ga.l1_crew_avg >= 35.5
           AND ga.actual_total IS NULL
-          AND gm.espn_game_id IS NOT NULL
-          AND gm.espn_game_id != ''
     """).fetchall()
 
-    updated = 0
+    if not rows:
+        return 0
+
+    # Group by date and fetch NCAA scoreboard once per date
+    dates = {}
     for row in rows:
-        score = fetch_espn_final_score(row["espn_game_id"])
-        if not score:
-            continue
+        d = row["game_date"]
+        dates.setdefault(d, []).append(row)
 
-        actual = score["actual_total"]
-        ou_line = row["ou_line"]
-        signal = row["signal_direction"]
+    updated = 0
+    for game_date, games_for_date in dates.items():
+        # Fetch NCAA scoreboard for this date
+        ncaa_date = game_date.replace("-", "/")  # "2026-03-12" -> "2026/03/12"
+        ncaa_games = fetch_ncaa_scoreboard(ncaa_date)
 
-        # Determine result
-        result = None
-        if ou_line is not None and signal:
-            if actual == ou_line:
-                result = "PUSH"
-            elif signal == "OVER":
-                result = "HIT" if actual > ou_line else "MISS"
-            elif signal == "UNDER":
-                result = "HIT" if actual < ou_line else "MISS"
+        for row in games_for_date:
+            # Try NCAA API first
+            match = _match_ncaa_game(row["home_team"], row["away_team"], ncaa_games) if ncaa_games else None
 
-        conn.execute("""
-            UPDATE game_analysis
-            SET actual_total = ?, home_score = ?, away_score = ?, result = ?,
-                updated_at = ?
-            WHERE game_key = ?
-        """, (actual, score["home_score"], score["away_score"], result,
-              datetime.now().isoformat(timespec="seconds"), row["game_key"]))
-        updated += 1
+            score = None
+            if match and match["game_state"] == "final" and match["home_score"] is not None:
+                score = {
+                    "home_score": match["home_score"],
+                    "away_score": match["away_score"],
+                    "actual_total": match["home_score"] + match["away_score"],
+                }
+            elif row["espn_game_id"]:
+                # Fallback to ESPN summary API
+                score = fetch_espn_final_score(row["espn_game_id"])
+
+            if not score:
+                continue
+
+            actual = score["actual_total"]
+            ou_line = row["ou_line"]
+            signal = row["signal_direction"]
+
+            # Determine result
+            result = None
+            if ou_line is not None and signal:
+                if actual == ou_line:
+                    result = "PUSH"
+                elif signal == "OVER":
+                    result = "HIT" if actual > ou_line else "MISS"
+                elif signal == "UNDER":
+                    result = "HIT" if actual < ou_line else "MISS"
+
+            conn.execute("""
+                UPDATE game_analysis
+                SET actual_total = ?, home_score = ?, away_score = ?, result = ?,
+                    updated_at = ?
+                WHERE game_key = ?
+            """, (actual, score["home_score"], score["away_score"], result,
+                  datetime.now(DISPLAY_TZ).isoformat(timespec="seconds"), row["game_key"]))
+            updated += 1
 
     if updated:
         conn.commit()
-        log.info(f"Updated {updated} game result(s).")
+        log.info(f"Updated {updated} game result(s) via NCAA API.")
     return updated
 
 

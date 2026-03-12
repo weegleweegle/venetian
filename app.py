@@ -141,17 +141,39 @@ def index():
 
     seasonal_mode = get_seasonal_mode(today)
 
-    # Determine which games are likely finished (started 3+ hours ago)
+    # Determine which games are finished using NCAA API scoreboard
+    from refmetrics_scraper import fetch_ncaa_scoreboard, _match_ncaa_game
+    ncaa_date = today.replace("-", "/")
+    try:
+        ncaa_games = fetch_ncaa_scoreboard(ncaa_date)
+    except Exception:
+        ncaa_games = []
+
+    # Build a set of completed game states from NCAA API
+    ncaa_final_teams = set()
+    for ng in ncaa_games:
+        if ng["game_state"] == "final":
+            ncaa_final_teams.add(ng["home_short"].lower())
+            ncaa_final_teams.add(ng["away_short"].lower())
+
     now_local = datetime.now(DISPLAY_TZ)
     completed_keys = set()
     for game in games:
         gk = game["game_key"]
-        # If we have a final score from ESPN, it's definitely done
+        # If we have a final score stored, it's definitely done
         a = analyses.get(gk, {})
         if a and a.get("actual_total"):
             completed_keys.add(gk)
             continue
-        # Otherwise estimate from game time
+        # Check NCAA API game state
+        home_lower = game["home_team"].lower()
+        away_lower = game["away_team"].lower()
+        if home_lower in ncaa_final_teams or away_lower in ncaa_final_teams:
+            ncaa_match = _match_ncaa_game(game["home_team"], game["away_team"], ncaa_games)
+            if ncaa_match and ncaa_match["game_state"] == "final":
+                completed_keys.add(gk)
+                continue
+        # Fallback: estimate from game time (3+ hours after tip)
         gt = game["game_time"]
         if gt:
             try:
