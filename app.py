@@ -233,6 +233,39 @@ def results():
         except Exception:
             pass
 
+    # Backfill: auto-score Layer 1 for any games missing analysis rows
+    from analysis import score_layer_1
+    try:
+        unscored = db.execute("""
+            SELECT gm.game_key, gm.crew_chief, gm.u1, gm.u2
+            FROM game_assignments gm
+            LEFT JOIN game_analysis ga ON gm.game_key = ga.game_key
+            WHERE ga.id IS NULL
+              AND gm.crew_chief IS NOT NULL AND gm.crew_chief != ''
+        """).fetchall()
+        for row in unscored:
+            cc, u1, u2 = row["crew_chief"], row["u1"] or "", row["u2"] or ""
+            ref_count = sum(1 for n in [cc, u1, u2] if n and n.strip())
+            if ref_count < 2:
+                continue
+            l1 = score_layer_1(db, cc, u1, u2)
+            now_ts = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+            db.execute("""
+                INSERT INTO game_analysis
+                    (game_key, l1_crew_avg, l1_tier, l1_strong_high_count,
+                     l1_strong_low_count, l1_signal, l1_ref_details, l1_aligned,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (row["game_key"], l1["l1_crew_avg"], l1["l1_tier"],
+                  l1["l1_strong_high_count"], l1["l1_strong_low_count"],
+                  l1["l1_signal"], l1["l1_ref_details"], l1["l1_aligned"],
+                  now_ts, now_ts))
+        if unscored:
+            db.commit()
+            log.info(f"Backfilled {len(unscored)} analysis rows for results page.")
+    except Exception as e:
+        log.warning(f"Analysis backfill failed: {e}")
+
     # All green-card games (crew avg >= 35.5) across all dates
     games = []
     try:
