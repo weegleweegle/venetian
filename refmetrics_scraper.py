@@ -390,7 +390,7 @@ def fetch_espn_schedule() -> list[dict]:
             try:
                 dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                 dt_local = dt.astimezone(DISPLAY_TZ)
-                tipoff = dt_local.replace(tzinfo=None)
+                tipoff = dt_local
                 time_str = dt_local.strftime("%I:%M %p").lstrip("0")
             except Exception:
                 pass
@@ -735,7 +735,7 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
     scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
     today_str  = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
-    gk = game_key(game)
+    gk = _resolve_game_key(game, conn, today_str)
     conn.execute("""
         INSERT INTO game_assignments
             (scraped_at, league, game_date, game_time, home_team, away_team,
@@ -1040,13 +1040,48 @@ def update_game_results(conn: sqlite3.Connection):
     return updated
 
 
+def _resolve_game_key(game: dict, conn: sqlite3.Connection, today_str: str) -> str:
+    """Resolve a stable game key, checking DB for existing entries with same teams.
+    Prevents duplicates when a game is saved once with ESPN ID and again with slug.
+    """
+    gk = game_key(game)
+    # If we already have an ESPN ID, use it
+    if game.get("espn_game_id"):
+        # Check if a slug-based entry already exists for this matchup
+        slug = f"{game['away']}@{game['home']}".lower().replace(" ", "_")
+        existing = conn.execute(
+            "SELECT game_key FROM game_assignments WHERE game_key = ? AND game_date = ?",
+            (slug, today_str)
+        ).fetchone()
+        if existing:
+            # Migrate the old slug entry to use the ESPN ID
+            conn.execute("UPDATE game_assignments SET game_key = ?, espn_game_id = ? WHERE game_key = ?",
+                         (gk, game["espn_game_id"], slug))
+            conn.execute("UPDATE game_analysis SET game_key = ? WHERE game_key = ?", (gk, slug))
+            conn.execute("UPDATE notifications_sent SET game_key = ? WHERE game_key = ?", (gk, slug))
+            conn.commit()
+            log.info(f"Migrated game key {slug} -> {gk}")
+        return gk
+    else:
+        # No ESPN ID — check if an ESPN-ID-based entry exists for these teams
+        home_lower = game["home"].lower()
+        away_lower = game["away"].lower()
+        existing = conn.execute(
+            "SELECT game_key FROM game_assignments WHERE game_date = ? AND LOWER(home_team) = ? AND LOWER(away_team) = ?",
+            (today_str, home_lower, away_lower)
+        ).fetchone()
+        if existing:
+            return existing["game_key"]  # reuse existing key (ESPN ID)
+        return gk
+
+
 def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
     """Save all games to DB immediately so the dashboard can display them."""
     scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
     today_str  = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     for game in games:
-        gk = game_key(game)
+        gk = _resolve_game_key(game, conn, today_str)
         conn.execute("""
             INSERT INTO game_assignments
                 (scraped_at, league, game_date, game_time, home_team, away_team,
