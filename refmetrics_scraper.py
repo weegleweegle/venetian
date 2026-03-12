@@ -89,8 +89,8 @@ def mark_notified(conn: sqlite3.Connection, game_key: str, notif_type: str):
     conn.commit()
 
 
-def notify_discord(game: dict):
-    """Send a Discord webhook when refs are assigned to a game."""
+def notify_discord(game: dict, crew_avg: float = None):
+    """Send a Discord webhook for a green card game (crew avg >= 35.5)."""
     if not DISCORD_WEBHOOK:
         return
 
@@ -100,15 +100,17 @@ def notify_discord(game: dict):
     if game.get("u2"):
         crew += f"  |  **U2** {game['u2']}"
 
+    avg_str = f"**Crew Avg: {crew_avg:.1f}**\n\n" if crew_avg else ""
+
     embed = {
-        "title": f"{game['away']} @ {game['home']}",
+        "title": f"\U0001f7e2 {game['away']} @ {game['home']}",
         "description": (
             f"**{game.get('game_time_str', '')}**"
             f"{' on ' + game['network'] if game.get('network') else ''}\n\n"
-            f"{crew}\n\n"
-            f"Source: {game.get('assignment_src', 'unknown').upper()}"
+            f"{avg_str}"
+            f"{crew}"
         ),
-        "color": 0x34d399 if game.get("assignment_src") == "refmetrics" else 0xfbbf24,
+        "color": 0x22c55e,
     }
 
     if game.get("location"):
@@ -767,10 +769,14 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
             except Exception as e:
                 log.warning(f"Ref profile scrape failed for {name}: {e}")
 
-    # Notify Discord when refs are assigned (only once per game)
+    # Notify Discord only for green card games (crew avg >= 35.5)
     if game["has_assignment"] and not was_notified(conn, gk, "discord_refs"):
-        notify_discord(game)
-        mark_notified(conn, gk, "discord_refs")
+        analysis_row = conn.execute(
+            "SELECT l1_crew_avg FROM game_analysis WHERE game_key = ?", (gk,)
+        ).fetchone()
+        if analysis_row and analysis_row["l1_crew_avg"] and analysis_row["l1_crew_avg"] >= 35.5:
+            notify_discord(game, crew_avg=analysis_row["l1_crew_avg"])
+            mark_notified(conn, gk, "discord_refs")
 
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
