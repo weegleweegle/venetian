@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 def _migrate_db(conn):
-    """Ensure result-tracking columns exist in game_analysis."""
+    """Ensure result-tracking columns and notification tracking exist."""
     try:
         cursor = conn.execute("PRAGMA table_info(game_analysis)")
         cols = {row[1] for row in cursor.fetchall()}
@@ -36,6 +36,19 @@ def _migrate_db(conn):
             conn.execute("ALTER TABLE game_analysis ADD COLUMN result TEXT")
             conn.commit()
             log.info("Migrated game_analysis: added result tracking columns.")
+    except Exception:
+        pass
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notifications_sent (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_key    TEXT NOT NULL,
+                notif_type  TEXT NOT NULL,
+                sent_at     TEXT,
+                UNIQUE(game_key, notif_type)
+            )
+        """)
+        conn.commit()
     except Exception:
         pass
 
@@ -410,14 +423,17 @@ def finalize_analysis(game_key):
     """, (now, game_key))
     db.commit()
 
-    # Send notifications for actionable grades
+    # Send notifications for actionable grades (only once per game)
     if grade in ("HALF_UNIT", "FULL_UNIT"):
-        game = db.execute(
-            "SELECT * FROM game_assignments WHERE game_key = ?", (game_key,)
-        ).fetchone()
-        if game:
-            game_dict = dict(game)
-            _notify_analysis(game_dict, analysis)
+        from refmetrics_scraper import was_notified, mark_notified
+        if not was_notified(db, game_key, "discord_analysis"):
+            game = db.execute(
+                "SELECT * FROM game_assignments WHERE game_key = ?", (game_key,)
+            ).fetchone()
+            if game:
+                game_dict = dict(game)
+                _notify_analysis(game_dict, analysis)
+                mark_notified(db, game_key, "discord_analysis")
 
     return jsonify({"status": "finalized", "grade": grade,
                     "signal_direction": signal})

@@ -71,6 +71,24 @@ log = logging.getLogger(__name__)
 
 
 # ── DISCORD NOTIFICATIONS ─────────────────────────────────────────────────────
+def was_notified(conn: sqlite3.Connection, game_key: str, notif_type: str) -> bool:
+    """Check if a notification was already sent for this game+type."""
+    row = conn.execute(
+        "SELECT 1 FROM notifications_sent WHERE game_key = ? AND notif_type = ?",
+        (game_key, notif_type)
+    ).fetchone()
+    return row is not None
+
+
+def mark_notified(conn: sqlite3.Connection, game_key: str, notif_type: str):
+    """Record that a notification was sent."""
+    conn.execute(
+        "INSERT OR IGNORE INTO notifications_sent (game_key, notif_type, sent_at) VALUES (?, ?, ?)",
+        (game_key, notif_type, datetime.now(DISPLAY_TZ).isoformat(timespec="seconds"))
+    )
+    conn.commit()
+
+
 def notify_discord(game: dict):
     """Send a Discord webhook when refs are assigned to a game."""
     if not DISCORD_WEBHOOK:
@@ -253,6 +271,15 @@ def init_db(db_path: str) -> sqlite3.Connection:
 
             created_at          TEXT,
             updated_at          TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications_sent (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_key    TEXT NOT NULL,
+            notif_type  TEXT NOT NULL,
+            sent_at     TEXT,
+            UNIQUE(game_key, notif_type)
         )
     """)
     conn.commit()
@@ -738,15 +765,9 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
             scrape_ref_profile(name, url, session, conn, scraped_at)
 
     # Notify Discord when refs are assigned (only once per game)
-    if game["has_assignment"]:
-        already = conn.execute(
-            "SELECT discord_notified FROM game_assignments WHERE game_key = ?", (gk,)
-        ).fetchone()
-        if not already or not already["discord_notified"]:
-            notify_discord(game)
-            conn.execute(
-                "UPDATE game_assignments SET discord_notified = 1 WHERE game_key = ?", (gk,)
-            )
+    if game["has_assignment"] and not was_notified(conn, gk, "discord_refs"):
+        notify_discord(game)
+        mark_notified(conn, gk, "discord_refs")
             conn.commit()
 
     log.info(
