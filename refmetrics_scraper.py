@@ -1116,8 +1116,8 @@ def build_schedule(session: requests.Session) -> list[dict]:
 
 
 def run_refresh(db_path: str = None) -> dict:
-    """Run a full scrape cycle and return summary stats.
-    Can be called from the Flask app for manual refresh.
+    """Run a lightweight refresh: fetch schedule + officials, save to DB.
+    Skips heavy ref profile scraping (the background worker handles that).
     """
     _db_path = db_path or DB_PATH
     conn = init_db(_db_path)
@@ -1126,14 +1126,11 @@ def run_refresh(db_path: str = None) -> dict:
 
     games = build_schedule(session)
     if not games:
+        conn.close()
         return {"games": 0, "assigned": 0}
 
     games = enrich_with_officials(games, session, has_refmetrics)
     save_games_to_db(games, conn)
-
-    # Run immediate scrape for all games (re-check officials, save stats)
-    for game in games:
-        scrape_game(game, session, conn, has_refmetrics)
 
     assigned = sum(1 for g in games if g["has_assignment"])
     conn.close()
