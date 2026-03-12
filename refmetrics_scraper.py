@@ -1084,7 +1084,7 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
         if ref_count < 2:
             continue
         l1 = score_layer_1(conn, cc, u1_name, u2_name)
-        now = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
         conn.execute("""
             INSERT INTO game_analysis
                 (game_key, l1_crew_avg, l1_tier, l1_strong_high_count,
@@ -1094,6 +1094,12 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
         """, (gk, l1["l1_crew_avg"], l1["l1_tier"], l1["l1_strong_high_count"],
               l1["l1_strong_low_count"], l1["l1_signal"], l1["l1_ref_details"],
               l1["l1_aligned"], now, now))
+
+        # Notify Discord for green card games (crew avg >= 35.5)
+        if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5:
+            if not was_notified(conn, gk, "discord_refs"):
+                notify_discord(game, crew_avg=l1["l1_crew_avg"])
+                mark_notified(conn, gk, "discord_refs")
     conn.commit()
 
 
