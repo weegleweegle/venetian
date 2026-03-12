@@ -762,13 +762,15 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
     # Scrape ref profile stats from RefMetrics if available
     if has_refmetrics:
         for name, url in game.get("ref_links", {}).items():
-            scrape_ref_profile(name, url, session, conn, scraped_at)
+            try:
+                scrape_ref_profile(name, url, session, conn, scraped_at)
+            except Exception as e:
+                log.warning(f"Ref profile scrape failed for {name}: {e}")
 
     # Notify Discord when refs are assigned (only once per game)
     if game["has_assignment"] and not was_notified(conn, gk, "discord_refs"):
         notify_discord(game)
         mark_notified(conn, gk, "discord_refs")
-            conn.commit()
 
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
@@ -779,7 +781,7 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
 def scrape_ref_profile(name: str, url: str, session: requests.Session,
                        conn: sqlite3.Connection, scraped_at: str):
     try:
-        r    = session.get(url, timeout=15)
+        r    = session.get(url, timeout=8)
         soup = BeautifulSoup(r.text, "html.parser")
     except requests.RequestException as e:
         log.warning(f"Profile fetch failed for {name}: {e}")
