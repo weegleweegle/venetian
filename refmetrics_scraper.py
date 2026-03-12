@@ -769,15 +769,6 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
             except Exception as e:
                 log.warning(f"Ref profile scrape failed for {name}: {e}")
 
-    # Notify Discord only for green card games (crew avg >= 35.5)
-    if game["has_assignment"] and not was_notified(conn, gk, "discord_refs"):
-        analysis_row = conn.execute(
-            "SELECT l1_crew_avg FROM game_analysis WHERE game_key = ?", (gk,)
-        ).fetchone()
-        if analysis_row and analysis_row["l1_crew_avg"] and analysis_row["l1_crew_avg"] >= 35.5:
-            notify_discord(game, crew_avg=analysis_row["l1_crew_avg"])
-            mark_notified(conn, gk, "discord_refs")
-
     log.info(
         f"Saved [{game.get('assignment_src','none')}] "
         f"{game.get('crew_chief','?')} / {game.get('u1','?')} / {game.get('u2','?')}"
@@ -1115,7 +1106,9 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
 
         # Notify Discord for green card games (crew avg >= 35.5)
         if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5:
-            if not was_notified(conn, gk, "discord_refs"):
+            already = was_notified(conn, gk, "discord_refs")
+            log.info(f"Green card {gk}: crew_avg={l1['l1_crew_avg']:.1f}, already_notified={already}")
+            if not already:
                 notify_discord(game, crew_avg=l1["l1_crew_avg"])
                 mark_notified(conn, gk, "discord_refs")
     conn.commit()
