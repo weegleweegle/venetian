@@ -861,6 +861,26 @@ def fetch_odds_totals() -> dict:
     return lines
 
 
+def _match_odds_line(team_name: str, lines: dict) -> float | None:
+    """Match a DB team name against Odds API team names using substring matching.
+    Odds API uses full names like 'Rutgers Scarlet Knights' while ESPN uses 'Rutgers'.
+    """
+    team_lower = team_name.lower()
+    # Exact match first
+    if team_lower in lines:
+        return lines[team_lower]
+    # Check if DB name is a prefix of any Odds API name
+    for odds_name, point in lines.items():
+        if odds_name.startswith(team_lower) or team_lower.startswith(odds_name):
+            return point
+    # Check if all words in DB name appear in an Odds API name
+    team_words = team_lower.split()
+    for odds_name, point in lines.items():
+        if all(w in odds_name for w in team_words):
+            return point
+    return None
+
+
 def update_odds(conn: sqlite3.Connection):
     """Fetch O/U lines and populate game_analysis.ou_line for today's games."""
     lines = fetch_odds_totals()
@@ -878,13 +898,11 @@ def update_odds(conn: sqlite3.Connection):
 
     updated = 0
     for row in rows:
-        home = row["home_team"].lower()
-        away = row["away_team"].lower()
-        point = lines.get(home) or lines.get(away)
+        point = _match_odds_line(row["home_team"], lines) or _match_odds_line(row["away_team"], lines)
         if point:
             conn.execute(
                 "UPDATE game_analysis SET ou_line = ?, updated_at = ? WHERE game_key = ?",
-                (point, datetime.now().isoformat(timespec="seconds"), row["game_key"])
+                (point, datetime.now(DISPLAY_TZ).isoformat(timespec="seconds"), row["game_key"])
             )
             log.info(f"Set O/U line {point} for {row['game_key']}")
             updated += 1
