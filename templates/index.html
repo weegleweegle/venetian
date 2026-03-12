@@ -655,6 +655,38 @@
         .game-final:hover {
             opacity: 0.8;
         }
+
+        /* ── DATE GROUP HEADERS ──────────────────────────────────── */
+        .date-group-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        .date-group-header:first-child {
+            margin-top: 0;
+        }
+
+        .date-group-header .date-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #666;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .date-group-header .date-label.today-label {
+            color: #34d399;
+        }
+
+        .date-group-header::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #222;
+        }
     </style>
 </head>
 <body>
@@ -677,7 +709,7 @@
         </header>
 
         <div class="nav-tabs">
-            <a href="/" class="nav-tab active">TODAY'S GAMES</a>
+            <a href="/" class="nav-tab active">GAMES</a>
             <a href="/results" class="nav-tab">RESULTS</a>
         </div>
 
@@ -808,37 +840,46 @@
             </div>
         {% endmacro %}
 
-        {% if games %}
-            {# Split into upcoming and completed games #}
-            {% set ns = namespace(upcoming=[], completed=[]) %}
-            {% for game in games %}
-                {% set gk = game.game_key %}
-                {% set a = analyses.get(gk, {}) if analyses else {} %}
-                {% if gk in completed_keys %}
-                    {% set ns.completed = ns.completed + [(game, a, gk)] %}
+        {% if games_by_date %}
+            {% for date, date_games in games_by_date.items() %}
+                {# Date group header #}
+                {% if date == today %}
+                    <div class="date-group-header">
+                        <span class="date-label today-label">Today &mdash; {{ date }}</span>
+                    </div>
                 {% else %}
-                    {% set ns.upcoming = ns.upcoming + [(game, a, gk)] %}
+                    <div class="date-group-header">
+                        <span class="date-label">{{ date }}</span>
+                    </div>
+                {% endif %}
+
+                {# Split into upcoming and completed within this date #}
+                {% set ns = namespace(upcoming=[], completed=[]) %}
+                {% for game in date_games %}
+                    {% set gk = game.game_key %}
+                    {% set a = analyses.get(gk, {}) if analyses else {} %}
+                    {% if gk in completed_keys %}
+                        {% set ns.completed = ns.completed + [(game, a, gk)] %}
+                    {% else %}
+                        {% set ns.upcoming = ns.upcoming + [(game, a, gk)] %}
+                    {% endif %}
+                {% endfor %}
+
+                {% for game, a, gk in ns.upcoming %}
+                    {{ game_card(game, a, gk, false) }}
+                {% endfor %}
+
+                {% if ns.completed %}
+                    <div class="completed-divider">
+                        <span>COMPLETED</span>
+                    </div>
+                    {% for game, a, gk in ns.completed %}
+                        {{ game_card(game, a, gk, true) }}
+                    {% endfor %}
                 {% endif %}
             {% endfor %}
-
-            {% for game, a, gk in ns.upcoming %}
-                {{ game_card(game, a, gk, false) }}
-            {% endfor %}
-
-            {% if ns.completed %}
-                <div class="completed-divider">
-                    <span>COMPLETED</span>
-                </div>
-                {% for game, a, gk in ns.completed %}
-                    {{ game_card(game, a, gk, true) }}
-                {% endfor %}
-            {% endif %}
-
-            {% if not ns.upcoming and not ns.completed %}
-                <div class="empty">No games scraped for today yet.</div>
-            {% endif %}
         {% else %}
-            <div class="empty">No games scraped for today yet.</div>
+            <div class="empty">No games scraped yet.</div>
         {% endif %}
     </div>
 

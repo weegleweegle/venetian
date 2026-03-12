@@ -84,10 +84,13 @@ def index():
     except Exception as e:
         log.warning(f"Result update failed: {e}")
 
+    # Fetch all games, grouped by date (today first, then descending)
     games = db.execute("""
         SELECT * FROM game_assignments
-        WHERE game_date = ?
-        ORDER BY game_time
+        ORDER BY
+            CASE WHEN game_date = ? THEN 0 ELSE 1 END,
+            game_date DESC,
+            game_time
     """, (today,)).fetchall()
 
     ref_stats = {}
@@ -134,7 +137,7 @@ def index():
                     except (json.JSONDecodeError, TypeError):
                         pass
                 analyses[gk] = a
-                if a.get("grade") in ("HALF_UNIT", "FULL_UNIT"):
+                if game["game_date"] == today and a.get("grade") in ("HALF_UNIT", "FULL_UNIT"):
                     plays_count += 1
     except Exception:
         pass  # table may not exist yet on first run
@@ -142,6 +145,7 @@ def index():
     seasonal_mode = get_seasonal_mode(today)
 
     # Determine which games are finished using NCAA API scoreboard
+    # Only fetch NCAA data for today's games (past dates are all completed)
     from refmetrics_scraper import fetch_ncaa_scoreboard, _match_ncaa_game
     ncaa_date = today.replace("-", "/")
     try:
@@ -149,7 +153,6 @@ def index():
     except Exception:
         ncaa_games = []
 
-    # Build a set of completed game states from NCAA API
     ncaa_final_teams = set()
     for ng in ncaa_games:
         if ng["game_state"] == "final":
@@ -160,6 +163,10 @@ def index():
     completed_keys = set()
     for game in games:
         gk = game["game_key"]
+        # Past dates are always completed
+        if game["game_date"] < today:
+            completed_keys.add(gk)
+            continue
         # If we have a final score stored, it's definitely done
         a = analyses.get(gk, {})
         if a and a.get("actual_total"):
@@ -177,15 +184,24 @@ def index():
         gt = game["game_time"]
         if gt:
             try:
-                game_dt = datetime.strptime(f"{today} {gt}", "%Y-%m-%d %I:%M %p")
+                game_dt = datetime.strptime(f"{game['game_date']} {gt}", "%Y-%m-%d %I:%M %p")
                 game_dt = game_dt.replace(tzinfo=DISPLAY_TZ)
                 if now_local > game_dt + timedelta(hours=3):
                     completed_keys.add(gk)
             except (ValueError, TypeError):
                 pass
 
+    # Group games by date for template
+    from collections import OrderedDict
+    games_by_date = OrderedDict()
+    for game in games:
+        d = game["game_date"]
+        if d not in games_by_date:
+            games_by_date[d] = []
+        games_by_date[d].append(game)
+
     return render_template("index.html",
-        games=games,
+        games_by_date=games_by_date,
         ref_stats=ref_stats,
         analyses=analyses,
         completed_keys=completed_keys,
