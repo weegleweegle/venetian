@@ -58,7 +58,7 @@ def close_db(exc):
 @app.route("/")
 def index():
     db = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     # Auto-fetch O/U lines and final scores
     from refmetrics_scraper import update_odds, update_game_results
@@ -251,7 +251,7 @@ def ref_detail(name):
 def get_analysis(game_key):
     from analysis import score_layer_1, get_seasonal_mode, compute_grade
     db = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     row = db.execute(
         "SELECT * FROM game_analysis WHERE game_key = ?", (game_key,)
@@ -297,7 +297,7 @@ def get_analysis(game_key):
 def save_analysis(game_key):
     from analysis import score_layer_3, compute_grade
     db = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     # Ensure row exists
     existing = db.execute(
@@ -387,7 +387,7 @@ def save_analysis(game_key):
 def finalize_analysis(game_key):
     from analysis import compute_grade
     db = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     row = db.execute(
         "SELECT * FROM game_analysis WHERE game_key = ?", (game_key,)

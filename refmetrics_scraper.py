@@ -325,7 +325,7 @@ def login_refmetrics(session: requests.Session) -> bool:
 # ── ESPN SCHEDULE (primary source) ───────────────────────────────────────────
 def fetch_espn_schedule() -> list[dict]:
     """Pull today's NCAAB schedule from ESPN's public scoreboard API."""
-    today_str = datetime.now().strftime("%Y%m%d")
+    today_str = datetime.now(DISPLAY_TZ).strftime("%Y%m%d")
     url = f"{ESPN_SCOREBOARD}?dates={today_str}&groups=50&limit=200"
 
     try:
@@ -456,7 +456,7 @@ def fetch_refmetrics_schedule(session: requests.Session) -> list[dict]:
         # Convert RefMetrics time (Eastern) to display timezone
         time_str = raw_time
         try:
-            today = datetime.now().date()
+            today = datetime.now(DISPLAY_TZ).date()
             t = datetime.strptime(raw_time, "%I:%M %p").time()
             dt_et = datetime.combine(today, t, tzinfo=REFMETRICS_TZ)
             dt_display = dt_et.astimezone(DISPLAY_TZ)
@@ -703,8 +703,8 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
     if not game["has_assignment"] and has_refmetrics:
         enrich_from_refmetrics([game], session)
 
-    scraped_at = datetime.now().isoformat(timespec="seconds")
-    today_str  = datetime.now().strftime("%Y-%m-%d")
+    scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+    today_str  = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     gk = game_key(game)
     conn.execute("""
@@ -838,7 +838,7 @@ def update_odds(conn: sqlite3.Connection):
     if not lines:
         return 0
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
     rows = conn.execute("""
         SELECT ga.game_key, gm.home_team, gm.away_team
         FROM game_analysis ga
@@ -1004,8 +1004,8 @@ def update_game_results(conn: sqlite3.Connection):
 
 def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
     """Save all games to DB immediately so the dashboard can display them."""
-    scraped_at = datetime.now().isoformat(timespec="seconds")
-    today_str  = datetime.now().strftime("%Y-%m-%d")
+    scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+    today_str  = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
     for game in games:
         gk = game_key(game)
@@ -1138,7 +1138,7 @@ def main():
     scheduler = BackgroundScheduler()
     scheduler.start()
 
-    now       = datetime.now()
+    now       = datetime.now(DISPLAY_TZ)
     scheduled = 0
 
     for game in games:
