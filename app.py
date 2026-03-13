@@ -310,6 +310,57 @@ def results():
     )
 
 
+@app.route("/api/backfill-lines", methods=["POST"])
+def backfill_lines():
+    """One-shot backfill of O/U lines and scores for 2026-03-12 games."""
+    db = get_db()
+    games = [
+        {"away": "Rhode Island",  "home": "Duquesne",    "ou_line": 135.5, "away_score": 61, "home_score": 67},
+        {"away": "UCF",           "home": "Arizona",     "ou_line": 136.0, "away_score": 59, "home_score": 81},
+        {"away": "Auburn",        "home": "Tennessee",   "ou_line": 135.5, "away_score": 62, "home_score": 72},
+        {"away": "Kentucky",      "home": "Missouri",    "ou_line": 135.5, "away_score": 78, "home_score": 72},
+        {"away": "Iowa",          "home": "Ohio State",  "ou_line": 135.5, "away_score": 69, "home_score": 72},
+        {"away": "Massachusetts", "home": "Miami (OH)",  "ou_line": 136.0, "away_score": 87, "home_score": 83},
+    ]
+    results = []
+    for g in games:
+        actual_total = g["away_score"] + g["home_score"]
+        row = db.execute("""
+            SELECT ga.game_key, ga.signal_direction
+            FROM game_analysis ga
+            JOIN game_assignments gm ON ga.game_key = gm.game_key
+            WHERE gm.game_date = '2026-03-12'
+              AND LOWER(gm.home_team) LIKE ?
+              AND LOWER(gm.away_team) LIKE ?
+        """, (f"%{g['home'].lower()}%", f"%{g['away'].lower()}%")).fetchone()
+
+        if not row:
+            results.append(f"NOT FOUND: {g['away']} @ {g['home']}")
+            continue
+
+        signal = row["signal_direction"]
+        result = None
+        if g["ou_line"] and signal:
+            if actual_total == g["ou_line"]:
+                result = "PUSH"
+            elif signal == "OVER":
+                result = "HIT" if actual_total > g["ou_line"] else "MISS"
+            elif signal == "UNDER":
+                result = "HIT" if actual_total < g["ou_line"] else "MISS"
+
+        db.execute("""
+            UPDATE game_analysis
+            SET ou_line = ?, home_score = ?, away_score = ?,
+                actual_total = ?, result = ?
+            WHERE game_key = ?
+        """, (g["ou_line"], g["home_score"], g["away_score"],
+              actual_total, result, row["game_key"]))
+        results.append(f"OK: {g['away']} @ {g['home']} | O/U {g['ou_line']} | Total {actual_total} | {result or 'NO_SIGNAL'}")
+
+    db.commit()
+    return jsonify({"updated": len([r for r in results if r.startswith("OK")]), "details": results})
+
+
 @app.route("/api/ref/<name>")
 def ref_detail(name):
     db = get_db()

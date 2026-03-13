@@ -876,19 +876,17 @@ def _match_odds_line(team_name: str, lines: dict) -> float | None:
 
 
 def update_odds(conn: sqlite3.Connection):
-    """Fetch O/U lines and populate game_analysis.ou_line for today's games."""
+    """Fetch O/U lines and populate game_analysis.ou_line for any games missing lines."""
     lines = fetch_odds_totals()
     if not lines:
         return 0
 
-    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
     rows = conn.execute("""
         SELECT ga.game_key, gm.home_team, gm.away_team
         FROM game_analysis ga
         JOIN game_assignments gm ON ga.game_key = gm.game_key
-        WHERE gm.game_date = ?
-          AND (ga.ou_line IS NULL OR ga.ou_line = 0)
-    """, (today,)).fetchall()
+        WHERE ga.ou_line IS NULL OR ga.ou_line = 0
+    """).fetchall()
 
     updated = 0
     for row in rows:
@@ -1254,6 +1252,14 @@ def main():
 
     # Save all games to DB immediately so the dashboard shows them
     save_games_to_db(games, conn)
+
+    # Fetch O/U lines early so they're captured before games start
+    try:
+        odds_count = update_odds(conn)
+        if odds_count:
+            log.info(f"Captured {odds_count} O/U lines.")
+    except Exception as e:
+        log.warning(f"Odds fetch failed: {e}")
 
     scheduler = BackgroundScheduler()
     scheduler.start()
