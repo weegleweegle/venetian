@@ -319,30 +319,6 @@ def results():
 
 
 
-@app.route("/api/cleanup-stale", methods=["POST"])
-def cleanup_stale():
-    """Remove old dateless slug game keys that collided with today's games."""
-    db = get_db()
-    today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
-    # Find dateless slug keys (no ESPN ID format, no date prefix) listed as today
-    rows = db.execute("""
-        SELECT game_key FROM game_assignments
-        WHERE game_date = ?
-          AND game_key NOT LIKE '4%'
-          AND game_key NOT LIKE '2026-%'
-    """, (today,)).fetchall()
-
-    deleted = []
-    for row in rows:
-        gk = row["game_key"]
-        db.execute("DELETE FROM game_assignments WHERE game_key = ?", (gk,))
-        db.execute("DELETE FROM game_analysis WHERE game_key = ?", (gk,))
-        db.execute("DELETE FROM notifications_sent WHERE game_key = ?", (gk,))
-        deleted.append(gk)
-
-    db.commit()
-    return jsonify({"deleted": len(deleted), "keys": deleted})
-
 
 @app.route("/api/update-lines", methods=["POST"])
 def update_lines():
