@@ -915,11 +915,31 @@ def _match_odds_line(team_name: str, lines: dict) -> float | None:
 
 
 def update_odds(conn: sqlite3.Connection):
-    """Fetch O/U lines and populate game_analysis.ou_line for any games missing lines."""
+    """Fetch O/U lines and populate game_analysis.ou_line for any games missing lines.
+    Creates minimal analysis rows for games that don't have one yet."""
     lines = fetch_odds_totals()
     if not lines:
         return 0
 
+    now_ts = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+
+    # First: ensure all games with matchable odds have an analysis row
+    all_games = conn.execute("""
+        SELECT gm.game_key, gm.home_team, gm.away_team
+        FROM game_assignments gm
+        LEFT JOIN game_analysis ga ON gm.game_key = ga.game_key
+        WHERE ga.id IS NULL
+    """).fetchall()
+    for row in all_games:
+        point = _match_odds_line(row["home_team"], lines) or _match_odds_line(row["away_team"], lines)
+        if point:
+            conn.execute("""
+                INSERT OR IGNORE INTO game_analysis (game_key, ou_line, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+            """, (row["game_key"], point, now_ts, now_ts))
+            log.info(f"Created analysis row with O/U {point} for {row['game_key']}")
+
+    # Second: update existing analysis rows missing lines
     rows = conn.execute("""
         SELECT ga.game_key, gm.home_team, gm.away_team
         FROM game_analysis ga
@@ -933,12 +953,12 @@ def update_odds(conn: sqlite3.Connection):
         if point:
             conn.execute(
                 "UPDATE game_analysis SET ou_line = ?, updated_at = ? WHERE game_key = ?",
-                (point, datetime.now(DISPLAY_TZ).isoformat(timespec="seconds"), row["game_key"])
+                (point, now_ts, row["game_key"])
             )
             log.info(f"Set O/U line {point} for {row['game_key']}")
             updated += 1
 
-    if updated:
+    if updated or all_games:
         conn.commit()
     return updated
 

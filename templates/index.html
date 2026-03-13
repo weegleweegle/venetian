@@ -749,6 +749,9 @@
                         {% endif %}
                     </div>
                     <div class="game-meta">
+                        {% if a and a.ou_line %}
+                            <span style="font-size:0.75rem;color:#60a5fa;font-weight:600;">O/U {{ a.ou_line }}</span>
+                        {% endif %}
                         {% if is_final %}
                             <span style="font-size:0.65rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:0.04em;">Final</span>
                         {% endif %}
@@ -810,9 +813,6 @@
                             </span>
                         {% elif a.grade == 'PASS' and a.stay_away_reason %}
                             <span class="grade-badge grade-pass" title="{{ a.stay_away_reason }}">PASS</span>
-                        {% endif %}
-                        {% if a.ou_line %}
-                            <span style="font-size:0.75rem;color:#60a5fa;font-weight:600;margin-left:0.5rem;">O/U {{ a.ou_line }}</span>
                         {% endif %}
                     </div>
                     <button class="analyze-btn" onclick="togglePanel('{{ gk }}')">
