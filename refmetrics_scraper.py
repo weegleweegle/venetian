@@ -608,10 +608,11 @@ def enrich_with_officials(games: list[dict], session: requests.Session,
 
 
 def game_key(game: dict) -> str:
-    """Unique key for a game: ESPN ID if available, otherwise 'away@home' slug."""
+    """Unique key for a game: ESPN ID if available, otherwise 'YYYY-MM-DD_away@home' slug."""
     if game.get("espn_game_id"):
         return str(game["espn_game_id"])
-    return f"{game['away']}@{game['home']}".lower().replace(" ", "_")
+    date_str = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
+    return f"{date_str}_{game['away']}@{game['home']}".lower().replace(" ", "_")
 
 
 def fuzzy_match(name_a: str, name_b: str) -> bool:
@@ -747,6 +748,8 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_key) DO UPDATE SET
             scraped_at=excluded.scraped_at,
+            game_date=excluded.game_date,
+            game_time=excluded.game_time,
             home_logo=COALESCE(NULLIF(excluded.home_logo,''), home_logo),
             away_logo=COALESCE(NULLIF(excluded.away_logo,''), away_logo),
             crew_chief=excluded.crew_chief,
@@ -1144,25 +1147,27 @@ def _resolve_game_key(game: dict, conn: sqlite3.Connection, today_str: str) -> s
     Prevents duplicates when a game is saved once with ESPN ID and again with slug.
     """
     gk = game_key(game)
-    # If we already have an ESPN ID, use it
+    dated_slug = f"{today_str}_{game['away']}@{game['home']}".lower().replace(" ", "_")
+    old_slug = f"{game['away']}@{game['home']}".lower().replace(" ", "_")
+
     if game.get("espn_game_id"):
-        # Check if a slug-based entry already exists for this matchup
-        slug = f"{game['away']}@{game['home']}".lower().replace(" ", "_")
-        existing = conn.execute(
-            "SELECT game_key FROM game_assignments WHERE game_key = ? AND game_date = ?",
-            (slug, today_str)
-        ).fetchone()
-        if existing:
-            # Migrate the old slug entry to use the ESPN ID
-            conn.execute("UPDATE game_assignments SET game_key = ?, espn_game_id = ? WHERE game_key = ?",
-                         (gk, game["espn_game_id"], slug))
-            conn.execute("UPDATE game_analysis SET game_key = ? WHERE game_key = ?", (gk, slug))
-            conn.execute("UPDATE notifications_sent SET game_key = ? WHERE game_key = ?", (gk, slug))
-            conn.commit()
-            log.info(f"Migrated game key {slug} -> {gk}")
+        # Check for dated slug or old-style slug to migrate
+        for slug in [dated_slug, old_slug]:
+            existing = conn.execute(
+                "SELECT game_key FROM game_assignments WHERE game_key = ? AND game_date = ?",
+                (slug, today_str)
+            ).fetchone()
+            if existing:
+                conn.execute("UPDATE game_assignments SET game_key = ?, espn_game_id = ? WHERE game_key = ?",
+                             (gk, game["espn_game_id"], slug))
+                conn.execute("UPDATE game_analysis SET game_key = ? WHERE game_key = ?", (gk, slug))
+                conn.execute("UPDATE notifications_sent SET game_key = ? WHERE game_key = ?", (gk, slug))
+                conn.commit()
+                log.info(f"Migrated game key {slug} -> {gk}")
+                break
         return gk
     else:
-        # No ESPN ID — check if an ESPN-ID-based entry exists for these teams
+        # No ESPN ID — check if an ESPN-ID-based entry exists for these teams today
         home_lower = game["home"].lower()
         away_lower = game["away"].lower()
         existing = conn.execute(
@@ -1170,7 +1175,7 @@ def _resolve_game_key(game: dict, conn: sqlite3.Connection, today_str: str) -> s
             (today_str, home_lower, away_lower)
         ).fetchone()
         if existing:
-            return existing["game_key"]  # reuse existing key (ESPN ID)
+            return existing["game_key"]
         return gk
 
 
@@ -1190,6 +1195,8 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_key) DO UPDATE SET
                 scraped_at=excluded.scraped_at,
+                game_date=excluded.game_date,
+                game_time=excluded.game_time,
                 home_logo=COALESCE(NULLIF(excluded.home_logo,''), home_logo),
                 away_logo=COALESCE(NULLIF(excluded.away_logo,''), away_logo),
                 location=COALESCE(NULLIF(excluded.location,''), location),
