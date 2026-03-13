@@ -286,6 +286,14 @@ def results():
                     gd["l1_ref_details"] = json.loads(gd["l1_ref_details"])
                 except (json.JSONDecodeError, TypeError):
                     pass
+            # Compute result: compare actual total vs O/U line
+            if gd.get("actual_total") and gd.get("ou_line"):
+                if gd["actual_total"] > gd["ou_line"]:
+                    gd["result"] = "OVER"
+                elif gd["actual_total"] < gd["ou_line"]:
+                    gd["result"] = "UNDER"
+                else:
+                    gd["result"] = "PUSH"
             games.append(gd)
     except Exception as e:
         log.warning(f"Results query failed: {e}")
@@ -293,22 +301,79 @@ def results():
     # Summary stats
     total = len(games)
     with_results = [g for g in games if g.get("result")]
-    hits = sum(1 for g in with_results if g["result"] == "HIT")
-    misses = sum(1 for g in with_results if g["result"] == "MISS")
+    overs = sum(1 for g in with_results if g["result"] == "OVER")
+    unders = sum(1 for g in with_results if g["result"] == "UNDER")
     pushes = sum(1 for g in with_results if g["result"] == "PUSH")
     pending = total - len(with_results)
-    win_pct = (hits / (hits + misses) * 100) if (hits + misses) > 0 else 0
+    over_pct = (overs / (overs + unders) * 100) if (overs + unders) > 0 else 0
 
     return render_template("results.html",
         games=games,
         total=total,
-        hits=hits,
-        misses=misses,
+        overs=overs,
+        unders=unders,
         pushes=pushes,
         pending=pending,
-        win_pct=win_pct,
+        over_pct=over_pct,
     )
 
+
+
+@app.route("/api/update-lines", methods=["POST"])
+def update_lines():
+    """Update O/U lines and scores for games.
+
+    Accepts JSON array: [{"away": "Team", "home": "Team", "date": "YYYY-MM-DD",
+                          "ou_line": 135.5, "away_score": 61, "home_score": 67}]
+    """
+    db = get_db()
+    data = request.get_json()
+    if not data or not isinstance(data, list):
+        return jsonify({"error": "Expected JSON array"}), 400
+
+    results = []
+    for g in data:
+        home = g.get("home", "")
+        away = g.get("away", "")
+        date = g.get("date", "")
+        ou_line = g.get("ou_line")
+
+        if not home or not away or not date:
+            results.append(f"SKIP: missing home/away/date")
+            continue
+
+        row = db.execute("""
+            SELECT ga.game_key
+            FROM game_analysis ga
+            JOIN game_assignments gm ON ga.game_key = gm.game_key
+            WHERE gm.game_date = ?
+              AND LOWER(gm.home_team) LIKE ?
+              AND LOWER(gm.away_team) LIKE ?
+        """, (date, f"%{home.lower()}%", f"%{away.lower()}%")).fetchone()
+
+        if not row:
+            results.append(f"NOT FOUND: {away} @ {home} ({date})")
+            continue
+
+        updates = {}
+        if ou_line is not None:
+            updates["ou_line"] = float(ou_line)
+        if g.get("home_score") is not None and g.get("away_score") is not None:
+            updates["home_score"] = int(g["home_score"])
+            updates["away_score"] = int(g["away_score"])
+            updates["actual_total"] = updates["home_score"] + updates["away_score"]
+
+        if not updates:
+            results.append(f"SKIP: no data for {away} @ {home}")
+            continue
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        vals = list(updates.values()) + [row["game_key"]]
+        db.execute(f"UPDATE game_analysis SET {set_clause} WHERE game_key = ?", vals)
+        results.append(f"OK: {away} @ {home} | " + " | ".join(f"{k}={v}" for k, v in updates.items()))
+
+    db.commit()
+    return jsonify({"updated": len([r for r in results if r.startswith("OK")]), "details": results})
 
 
 @app.route("/api/ref/<name>")

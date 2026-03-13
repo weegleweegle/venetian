@@ -99,8 +99,8 @@
             margin-top: 0.2rem;
         }
 
-        .summary-card.hit .value { color: #34d399; }
-        .summary-card.miss .value { color: #f87171; }
+        .summary-card.over .value { color: #34d399; }
+        .summary-card.under .value { color: #f87171; }
         .summary-card.push .value { color: #fbbf24; }
         .summary-card.pct .value { color: #60a5fa; }
 
@@ -204,8 +204,8 @@
             letter-spacing: 0.05em;
         }
 
-        .result-hit { background: #0d3320; color: #34d399; }
-        .result-miss { background: #3b1010; color: #f87171; }
+        .result-over { background: #0d3320; color: #34d399; }
+        .result-under { background: #3b1010; color: #f87171; }
         .result-push { background: #332b0d; color: #fbbf24; }
         .result-pending { background: #1a1a1a; color: #555; }
 
@@ -310,21 +310,21 @@
                 <div class="value">{{ total }}</div>
                 <div class="label">Total Games</div>
             </div>
-            <div class="summary-card hit">
-                <div class="value">{{ hits }}</div>
-                <div class="label">Hits</div>
+            <div class="summary-card over">
+                <div class="value">{{ overs }}</div>
+                <div class="label">Overs</div>
             </div>
-            <div class="summary-card miss">
-                <div class="value">{{ misses }}</div>
-                <div class="label">Misses</div>
+            <div class="summary-card under">
+                <div class="value">{{ unders }}</div>
+                <div class="label">Unders</div>
             </div>
             <div class="summary-card push">
                 <div class="value">{{ pushes }}</div>
                 <div class="label">Pushes</div>
             </div>
             <div class="summary-card pct">
-                <div class="value">{{ "%.0f"|format(win_pct) }}%</div>
-                <div class="label">Win Rate</div>
+                <div class="value">{{ "%.0f"|format(over_pct) }}%</div>
+                <div class="label">Over Rate</div>
             </div>
             <div class="summary-card">
                 <div class="value">{{ pending }}</div>
@@ -395,10 +395,10 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if g.result == 'HIT' %}
-                            <span class="result-badge result-hit">HIT</span>
-                        {% elif g.result == 'MISS' %}
-                            <span class="result-badge result-miss">MISS</span>
+                        {% if g.result == 'OVER' %}
+                            <span class="result-badge result-over">OVER</span>
+                        {% elif g.result == 'UNDER' %}
+                            <span class="result-badge result-under">UNDER</span>
                         {% elif g.result == 'PUSH' %}
                             <span class="result-badge result-push">PUSH</span>
                         {% else %}
