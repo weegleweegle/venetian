@@ -777,6 +777,44 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
         f"{game.get('crew_chief','?')} / {game.get('u1','?')} / {game.get('u2','?')}"
     )
 
+    # Auto-score Layer 1 and fetch O/U line if refs are assigned
+    if game.get("has_assignment"):
+        cc = game.get("crew_chief", "")
+        u1_name = game.get("u1", "")
+        u2_name = game.get("u2", "")
+        ref_count = sum(1 for n in [cc, u1_name, u2_name] if n and n.strip())
+        if ref_count >= 2:
+            existing = conn.execute(
+                "SELECT id FROM game_analysis WHERE game_key = ?", (gk,)
+            ).fetchone()
+            if not existing:
+                from analysis import score_layer_1
+                l1 = score_layer_1(conn, cc, u1_name, u2_name)
+                now_ts = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+                conn.execute("""
+                    INSERT INTO game_analysis
+                        (game_key, l1_crew_avg, l1_tier, l1_strong_high_count,
+                         l1_strong_low_count, l1_signal, l1_ref_details, l1_aligned,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (gk, l1["l1_crew_avg"], l1["l1_tier"], l1["l1_strong_high_count"],
+                      l1["l1_strong_low_count"], l1["l1_signal"], l1["l1_ref_details"],
+                      l1["l1_aligned"], now_ts, now_ts))
+                conn.commit()
+                log.info(f"Auto-scored Layer 1 for {gk}: crew_avg={l1['l1_crew_avg']}")
+
+                # Notify Discord for green card games
+                if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5:
+                    if not was_notified(conn, gk, "discord_refs"):
+                        notify_discord(game, crew_avg=l1["l1_crew_avg"])
+                        mark_notified(conn, gk, "discord_refs")
+
+            # Fetch O/U line if analysis row exists but line is missing
+            try:
+                update_odds(conn)
+            except Exception as e:
+                log.warning(f"Odds fetch failed for {gk}: {e}")
+
 
 def scrape_ref_profile(name: str, url: str, session: requests.Session,
                        conn: sqlite3.Connection, scraped_at: str):
