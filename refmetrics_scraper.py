@@ -803,8 +803,10 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
                 conn.commit()
                 log.info(f"Auto-scored Layer 1 for {gk}: crew_avg={l1['l1_crew_avg']}")
 
-                # Notify Discord for green card games
-                if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5:
+                # Notify Discord for green card games — only if game hasn't tipped off
+                tipoff = game.get("tipoff")
+                game_is_live = tipoff and tipoff <= datetime.now(DISPLAY_TZ)
+                if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5 and not game_is_live:
                     if not was_notified(conn, gk, "discord_refs"):
                         notify_discord(game, crew_avg=l1["l1_crew_avg"])
                         mark_notified(conn, gk, "discord_refs")
@@ -1190,10 +1192,11 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
 
     # Auto-score Layer 1 for games with 2+ refs assigned
     from analysis import score_layer_1
+    now_dt = datetime.now(DISPLAY_TZ)
     for game in games:
         if not game.get("has_assignment"):
             continue
-        gk = game_key(game)
+        gk = _resolve_game_key(game, conn, today_str)
         existing = conn.execute(
             "SELECT id FROM game_analysis WHERE game_key = ?", (gk,)
         ).fetchone()
@@ -1206,7 +1209,7 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
         if ref_count < 2:
             continue
         l1 = score_layer_1(conn, cc, u1_name, u2_name)
-        now = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+        now = now_dt.isoformat(timespec="seconds")
         conn.execute("""
             INSERT INTO game_analysis
                 (game_key, l1_crew_avg, l1_tier, l1_strong_high_count,
@@ -1217,8 +1220,10 @@ def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
               l1["l1_strong_low_count"], l1["l1_signal"], l1["l1_ref_details"],
               l1["l1_aligned"], now, now))
 
-        # Notify Discord for green card games (crew avg >= 35.5)
-        if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5:
+        # Notify Discord for green card games — only if game hasn't tipped off yet
+        tipoff = game.get("tipoff")
+        game_is_live = tipoff and tipoff <= now_dt
+        if l1["l1_crew_avg"] and l1["l1_crew_avg"] >= 35.5 and not game_is_live:
             already = was_notified(conn, gk, "discord_refs")
             log.info(f"Green card {gk}: crew_avg={l1['l1_crew_avg']:.1f}, already_notified={already}")
             if not already:
