@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
 USERNAME       = os.environ.get("REFMETRICS_USERNAME", "")
@@ -38,7 +38,6 @@ LOGIN_URL      = f"{REFMETRICS_URL}/login"
 HOME_URL       = REFMETRICS_URL + "/"
 TODAYS_GAMES_URL = REFMETRICS_URL + "/ncaa-men/todays-games"
 
-MINUTES_BEFORE = int(os.environ.get("MINUTES_BEFORE", "10"))
 DB_PATH        = os.environ.get("DB_PATH", "/app/data/refmetrics.db")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "")
 DISPLAY_TZ      = ZoneInfo(os.environ.get("DISPLAY_TZ", "America/Chicago"))
@@ -1273,30 +1272,40 @@ def run_refresh(db_path: str = None) -> dict:
     return {"games": len(games), "assigned": assigned}
 
 
-def main():
-    log.info("=" * 60)
-    log.info("Venetian — NCAA MBB Referee Tracker")
-    log.info(f"Schedule: ESPN  |  Trigger: T-{MINUTES_BEFORE} min")
-    log.info("=" * 60)
+def scrape_cycle():
+    """Run a full scrape cycle: fetch schedule, enrich officials, save, fetch odds & scores."""
+    log.info("-" * 40)
+    log.info(f"Scrape cycle starting at {datetime.now(DISPLAY_TZ).strftime('%I:%M %p %Z')}")
 
-    conn    = init_db(DB_PATH)
+    conn = init_db(DB_PATH)
     session = create_session()
-
     has_refmetrics = login_refmetrics(session)
 
     # Build schedule from RefMetrics + ESPN
     games = build_schedule(session)
     if not games:
-        log.warning("No games found today. Exiting.")
+        log.warning("No games found today.")
+        conn.close()
         return
 
-    # Get referee assignments for any still missing
+    # Get referee assignments
     games = enrich_with_officials(games, session, has_refmetrics)
 
-    # Save all games to DB immediately so the dashboard shows them
+    # Save all games to DB
     save_games_to_db(games, conn)
 
-    # Fetch O/U lines early so they're captured before games start
+    # Scrape ref profiles for games with assignments
+    for game in games:
+        if not game.get("has_assignment") or not has_refmetrics:
+            continue
+        for name, url in game.get("ref_links", {}).items():
+            try:
+                scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
+                scrape_ref_profile(name, url, session, conn, scraped_at)
+            except Exception as e:
+                log.warning(f"Ref profile scrape failed for {name}: {e}")
+
+    # Fetch O/U lines
     try:
         odds_count = update_odds(conn)
         if odds_count:
@@ -1304,42 +1313,39 @@ def main():
     except Exception as e:
         log.warning(f"Odds fetch failed: {e}")
 
-    scheduler = BackgroundScheduler()
-    scheduler.start()
-
-    now       = datetime.now(DISPLAY_TZ)
-    scheduled = 0
-
-    for game in games:
-        if game["tipoff"] is None:
-            log.info(f"  (no tipoff time) {game['away']} @ {game['home']}")
-            scrape_game(game, session, conn, has_refmetrics)
-            continue
-
-        trigger_time = game["tipoff"] - timedelta(minutes=MINUTES_BEFORE)
-
-        if trigger_time <= now:
-            log.info(f"  (immediate) {game['away']} @ {game['home']}")
-            scrape_game(game, session, conn, has_refmetrics)
-        else:
-            scheduler.add_job(
-                scrape_game,
-                trigger=DateTrigger(run_date=trigger_time),
-                args=[game, session, conn, has_refmetrics],
-                id=f"{game['home']}_{game['away']}".replace(" ", "_"),
-                replace_existing=True,
-            )
-            src = "ESPN" if game["has_assignment"] and game["assignment_src"] == "espn" \
-                  else "RM" if game["has_assignment"] else "TBD"
-            log.info(
-                f"  [{src:6}] {game['away']} @ {game['home']}"
-                f"  -> fire at {trigger_time.strftime('%I:%M %p')}"
-            )
-            scheduled += 1
+    # Fetch final scores
+    try:
+        update_game_results(conn)
+    except Exception as e:
+        log.warning(f"Score update failed: {e}")
 
     assigned = sum(1 for g in games if g["has_assignment"])
-    log.info(f"\n{len(games)} games, {assigned} with officials, {scheduled} scheduled.")
-    log.info("Waiting for scheduled jobs...\n")
+    log.info(f"Cycle complete: {len(games)} games, {assigned} with officials.")
+    conn.close()
+
+
+def main():
+    log.info("=" * 60)
+    log.info("Venetian — NCAA MBB Referee Tracker")
+    log.info("Schedule: every hour at :21 and :51")
+    log.info("=" * 60)
+
+    # Run once immediately on startup
+    try:
+        scrape_cycle()
+    except Exception as e:
+        log.error(f"Initial scrape cycle failed: {e}")
+
+    # Schedule recurring runs at :21 and :51
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        scrape_cycle,
+        CronTrigger(minute="21,51", timezone=DISPLAY_TZ),
+        id="scrape_cycle",
+        replace_existing=True,
+    )
+    scheduler.start()
+    log.info("Scheduler running — scrape at :21 and :51 past each hour.\n")
 
     try:
         while True:
@@ -1347,7 +1353,6 @@ def main():
     except KeyboardInterrupt:
         log.info("Shutting down.")
         scheduler.shutdown()
-        conn.close()
 
 
 if __name__ == "__main__":
