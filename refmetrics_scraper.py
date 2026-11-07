@@ -1354,7 +1354,7 @@ def scrape_cycle():
 def main():
     log.info("=" * 60)
     log.info("Venetian — NCAA MBB Referee Tracker")
-    log.info("Schedule: every hour at :21 and :51")
+    log.info("Schedule: every 10 minutes")
     log.info("=" * 60)
 
     # Run once immediately on startup
@@ -1363,16 +1363,16 @@ def main():
     except Exception as e:
         log.error(f"Initial scrape cycle failed: {e}")
 
-    # Schedule recurring runs at :21 and :51
+    # Schedule recurring runs every 10 minutes
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         scrape_cycle,
-        CronTrigger(minute="21,51", timezone=DISPLAY_TZ),
+        CronTrigger(minute="*/10", timezone=DISPLAY_TZ),
         id="scrape_cycle",
         replace_existing=True,
     )
     scheduler.start()
-    log.info("Scheduler running — scrape at :21 and :51 past each hour.\n")
+    log.info("Scheduler running — scrape every 10 minutes.\n")
 
     try:
         while True:
