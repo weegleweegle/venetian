@@ -94,6 +94,16 @@ class TestScrape:
         assert session.get.call_count == 1
         assert conn.execute("SELECT COUNT(*) FROM referee_stats").fetchone()[0] == 1
 
+    def test_page_without_tables_is_not_saved(self, conn):
+        session = MagicMock()
+        session.get.return_value.text = "<html><body>Too many requests</body></html>"
+        session.get.return_value.status_code = 429
+        now = datetime.now(rs.DISPLAY_TZ).isoformat(timespec="seconds")
+        rs.scrape_ref_profile("Tony Chiazza", "http://x", session, conn, now)
+        rs.scrape_ref_profile("Tony Chiazza", "http://x", session, conn, now)
+        assert conn.execute("SELECT COUNT(*) FROM referee_stats").fetchone()[0] == 0
+        assert session.get.call_count == 2  # retried, not marked done
+
     def test_rescrapes_old_format_and_stale_rows(self, conn):
         session = self._session()
         now = datetime.now(rs.DISPLAY_TZ)

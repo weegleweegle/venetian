@@ -918,6 +918,12 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
         return
 
     summary, game_log, headers = parse_ref_profile(r.text)
+    if not headers:
+        # No tables at all: an error, throttle or login page, not a real
+        # profile. Don't save it, so the ref is retried next cycle.
+        log.warning(f"  Profile page for {name} had no tables "
+                    f"(HTTP {r.status_code}, {r.url}); will retry")
+        return
     if not game_log:
         log.warning(f"  No game log on profile for {name}; table headers seen: {headers}")
 
