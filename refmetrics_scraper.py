@@ -17,6 +17,7 @@ Usage:
 """
 
 import json
+import re
 import logging
 import os
 import sqlite3
@@ -59,6 +60,14 @@ ODDS_API_URL = (
     "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"
     "?regions=us&markets=totals&oddsFormat=american&apiKey={api_key}"
 )
+
+# Polymarket Gamma API — free, no key. Fallback O/U source for games
+# The Odds API didn't cover. Series 10470 = College Basketball games.
+POLYMARKET_EVENTS_URL = "https://gamma-api.polymarket.com/events"
+POLYMARKET_CBB_SERIES = "10470"
+POLYMARKET_MAX_PAGES  = 10
+# Only trust a line whose Over price is this close to 50/50.
+POLYMARKET_MAX_SKEW   = 0.20
 
 # NCAA API — scoreboard with scores and game state
 NCAA_API_SCOREBOARD = "https://ncaa-api.henrygd.me/scoreboard/basketball-men/d1"
@@ -922,34 +931,155 @@ def _match_odds_line(team_name: str, lines: dict) -> float | None:
     return None
 
 
+def _polymarket_main_line(markets: list[dict]) -> float | None:
+    """Pick the main totals line: the open market whose Over price is closest
+    to 0.50. Returns None if no line is close enough to 50/50 to trust."""
+    best, best_skew = None, None
+    for m in markets:
+        if m.get("sportsMarketType") != "totals" or m.get("closed"):
+            continue
+        if m.get("line") is None:
+            continue
+        try:
+            outcomes = json.loads(m.get("outcomes") or "[]")
+            prices = json.loads(m.get("outcomePrices") or "[]")
+            over_price = float(prices[outcomes.index("Over")])
+        except (ValueError, TypeError, IndexError, json.JSONDecodeError):
+            continue
+        skew = abs(over_price - 0.5)
+        if best_skew is None or skew < best_skew:
+            best, best_skew = float(m["line"]), skew
+    if best_skew is None or best_skew > POLYMARKET_MAX_SKEW:
+        return None
+    return best
+
+
+def fetch_polymarket_totals(now: datetime | None = None) -> dict:
+    """Fetch O/U lines from Polymarket for college basketball games that
+    haven't started yet. Returns {game_date: [(team_a, team_b, point), ...]}
+    with lowercase full team names and game_date as YYYY-MM-DD in DISPLAY_TZ."""
+    now = now or datetime.now(timezone.utc)
+    by_date: dict[str, list] = {}
+    found = 0
+    for page in range(POLYMARKET_MAX_PAGES):
+        try:
+            r = requests.get(POLYMARKET_EVENTS_URL, timeout=15, params={
+                "series_id": POLYMARKET_CBB_SERIES, "closed": "false",
+                "limit": 100, "offset": page * 100,
+            })
+            events = r.json()
+        except Exception as e:
+            log.warning(f"Polymarket fetch failed: {e}")
+            break
+        if not isinstance(events, list) or not events:
+            break
+        for event in events:
+            title = event.get("title", "")
+            if " vs. " not in title:
+                continue
+            markets = event.get("markets") or []
+            start = next((m.get("gameStartTime") for m in markets
+                          if m.get("gameStartTime")), None)
+            try:
+                start_dt = datetime.fromisoformat(start.replace(" ", "T"))
+            except (AttributeError, ValueError):
+                continue
+            if start_dt <= now:
+                continue  # in-game prices don't reflect the pregame line
+            point = _polymarket_main_line(markets)
+            if point is None:
+                continue
+            game_date = start_dt.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d")
+            team_a, team_b = (t.strip().lower() for t in title.split(" vs. ", 1))
+            by_date.setdefault(game_date, []).append((team_a, team_b, point))
+            found += 1
+        if len(events) < 100:
+            break
+    log.info(f"Polymarket: {found} upcoming games with O/U lines")
+    return by_date
+
+
+def _team_name_matches(db_name: str, full_name: str) -> bool:
+    """'Ohio State' matches 'ohio state buckeyes'. A short name like 'Texas'
+    also matches 'texas tech red raiders', so callers require both teams
+    of a game to match before trusting it."""
+    db, full = _norm_team(db_name), _norm_team(full_name)
+    return bool(db) and (full == db or full.startswith(db + " "))
+
+
+def _norm_team(name: str) -> str:
+    """Lowercase and drop punctuation so "Hawai'i" == "Hawaii", "St." == "St"."""
+    name = re.sub(r"[.'’ʻ`()]", "", name.lower())
+    return " ".join(name.split())
+
+
+def _match_polymarket_game(home: str, away: str, games: list) -> float | None:
+    """Find the line for a game where BOTH teams match (either order)."""
+    for a, b, point in games:
+        if ((_team_name_matches(home, a) and _team_name_matches(away, b)) or
+                (_team_name_matches(home, b) and _team_name_matches(away, a))):
+            return point
+    return None
+
+
 def update_odds(conn: sqlite3.Connection):
     """Fetch O/U lines and populate game_analysis.ou_line for any games missing lines.
-    Creates minimal analysis rows for games that don't have one yet."""
-    lines = fetch_odds_totals()
-    if not lines:
-        return 0
+    Creates minimal analysis rows for games that don't have one yet.
+    The Odds API is the main source; Polymarket fills in games it doesn't cover."""
+    odds_lines = fetch_odds_totals()
 
+    def lookup_odds(row):
+        return (_match_odds_line(row["home_team"], odds_lines)
+                or _match_odds_line(row["away_team"], odds_lines))
+
+    updated = 0
+    if odds_lines:
+        updated += _apply_lines(conn, lookup_odds, "Odds API")
+
+    missing = conn.execute("""
+        SELECT COUNT(*) FROM game_assignments gm
+        LEFT JOIN game_analysis ga ON gm.game_key = ga.game_key
+        WHERE gm.game_date >= ?
+          AND (ga.id IS NULL OR ga.ou_line IS NULL OR ga.ou_line = 0)
+    """, (datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d"),)).fetchone()[0]
+    if missing:
+        poly = fetch_polymarket_totals()
+
+        def lookup_poly(row):
+            return _match_polymarket_game(row["home_team"], row["away_team"],
+                                          poly.get(row["game_date"], []))
+
+        if poly:
+            updated += _apply_lines(conn, lookup_poly, "Polymarket")
+    return updated
+
+
+def _apply_lines(conn: sqlite3.Connection, lookup, source: str) -> int:
+    """Write O/U lines from `lookup(row) -> point|None` into game_analysis
+    for games that don't have one yet. Never overwrites an existing line."""
     now_ts = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
 
     # First: ensure all games with matchable odds have an analysis row
     all_games = conn.execute("""
-        SELECT gm.game_key, gm.home_team, gm.away_team
+        SELECT gm.game_key, gm.home_team, gm.away_team, gm.game_date
         FROM game_assignments gm
         LEFT JOIN game_analysis ga ON gm.game_key = ga.game_key
         WHERE ga.id IS NULL
     """).fetchall()
+    created = 0
     for row in all_games:
-        point = _match_odds_line(row["home_team"], lines) or _match_odds_line(row["away_team"], lines)
+        point = lookup(row)
         if point:
             conn.execute("""
                 INSERT OR IGNORE INTO game_analysis (game_key, ou_line, created_at, updated_at)
                 VALUES (?, ?, ?, ?)
             """, (row["game_key"], point, now_ts, now_ts))
-            log.info(f"Created analysis row with O/U {point} for {row['game_key']}")
+            log.info(f"Created analysis row with O/U {point} ({source}) for {row['game_key']}")
+            created += 1
 
     # Second: update existing analysis rows missing lines
     rows = conn.execute("""
-        SELECT ga.game_key, gm.home_team, gm.away_team
+        SELECT ga.game_key, gm.home_team, gm.away_team, gm.game_date
         FROM game_analysis ga
         JOIN game_assignments gm ON ga.game_key = gm.game_key
         WHERE ga.ou_line IS NULL OR ga.ou_line = 0
@@ -957,16 +1087,16 @@ def update_odds(conn: sqlite3.Connection):
 
     updated = 0
     for row in rows:
-        point = _match_odds_line(row["home_team"], lines) or _match_odds_line(row["away_team"], lines)
+        point = lookup(row)
         if point:
             conn.execute(
                 "UPDATE game_analysis SET ou_line = ?, updated_at = ? WHERE game_key = ?",
                 (point, now_ts, row["game_key"])
             )
-            log.info(f"Set O/U line {point} for {row['game_key']}")
+            log.info(f"Set O/U line {point} ({source}) for {row['game_key']}")
             updated += 1
 
-    if updated or all_games:
+    if updated or created:
         conn.commit()
     return updated
 
