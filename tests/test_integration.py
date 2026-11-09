@@ -477,3 +477,14 @@ class TestHomepageNoBlockingFetches:
             assert c.get("/").status_code == 200
         assert sb.call_count == 1
         assert sb.call_args.kwargs["timeout"] == 5
+
+    def test_results_page_skips_odds_and_results(self, client):
+        c, db = client
+        with patch("refmetrics_scraper.update_odds") as odds, \
+             patch("refmetrics_scraper.update_game_results") as results, \
+             patch("refmetrics_scraper.fetch_ncaa_scoreboard") as sb:
+            resp = c.get("/results")
+        assert resp.status_code == 200
+        odds.assert_not_called()
+        results.assert_not_called()
+        sb.assert_not_called()

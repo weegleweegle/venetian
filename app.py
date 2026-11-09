@@ -234,20 +234,8 @@ def index():
 def results():
     db = get_db()
 
-    # Auto-fetch O/U lines and final scores
-    from refmetrics_scraper import update_game_results, update_odds
-    try:
-        update_odds(db)
-    except Exception as e:
-        log.warning(f"Odds update failed: {e}")
-    try:
-        update_game_results(db)
-    except Exception as e:
-        log.warning(f"Result update failed: {e}")
-        try:
-            db.rollback()
-        except Exception:
-            pass
+    # O/U lines and final scores are fetched by the scraper every 10 minutes;
+    # fetching them here on every page load made the page slow.
 
     # Backfill: auto-score Layer 1 for any games missing analysis rows
     from analysis import score_layer_1
