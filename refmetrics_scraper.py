@@ -214,6 +214,11 @@ def init_db(db_path: str) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_referee_stats_name_time
         ON referee_stats (official_name, scraped_at)
     """)
+    # game_log_json: per-game rows parsed from the ref's RefMetrics profile.
+    # Non-NULL also marks rows written by the current profile parser.
+    rs_cols = {r[1] for r in conn.execute("PRAGMA table_info(referee_stats)")}
+    if "game_log_json" not in rs_cols:
+        conn.execute("ALTER TABLE referee_stats ADD COLUMN game_log_json TEXT")
     import history
     history.ensure_tables(conn)
     conn.execute("""
@@ -836,46 +841,103 @@ def scrape_game(game: dict, session: requests.Session, conn: sqlite3.Connection,
                 log.warning(f"Odds fetch failed for {gk}: {e}")
 
 
-def scrape_ref_profile(name: str, url: str, session: requests.Session,
-                       conn: sqlite3.Connection, scraped_at: str):
-    try:
-        r    = session.get(url, timeout=8)
-        soup = BeautifulSoup(r.text, "html.parser")
-    except requests.RequestException as e:
-        log.warning(f"Profile fetch failed for {name}: {e}")
-        return
+PROFILE_REFRESH_HOURS = 20  # profiles change at most daily; don't re-scrape every cycle
 
-    stats = {}
+
+def _cell_text(cell) -> str:
+    return " ".join(cell.get_text(" ", strip=True).split())
+
+
+def _parse_pair(text: str) -> tuple[int, int] | None:
+    """'18 - 20' -> (18, 20)."""
+    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def parse_ref_profile(html: str) -> tuple[dict, list[dict], list[list[str]]]:
+    """Parse a RefMetrics referee profile page.
+
+    Returns (summary, game_log, table_headers):
+      summary    flat {label: value} for the ref popup, plus computed
+                 'Fouls/Game', 'Logged Games', 'O/U Record (logged)'
+      game_log   one dict per row of the table that has Date and Fouls columns
+      headers    every table's header row, for diagnosing layout changes
+    Each table is read on its own, so rows no longer overwrite each other."""
+    soup = BeautifulSoup(html, "html.parser")
+    summary: dict[str, str] = {}
+    game_log: list[dict] = []
+    all_headers: list[list[str]] = []
 
     for block in soup.find_all(class_=lambda c: c and "stat" in c.lower()):
         label = block.find(class_=lambda c: c and "label" in c.lower())
         value = block.find(class_=lambda c: c and "value" in c.lower())
         if label and value:
-            stats[label.get_text(strip=True)] = value.get_text(strip=True)
+            summary[_cell_text(label)] = _cell_text(value)
 
     for table in soup.find_all("table"):
-        headers = [th.get_text(strip=True) for th in table.find_all("th")]
-        for row in table.find_all("tr")[1:]:
-            vals = [td.get_text(strip=True) for td in row.find_all("td")]
-            for h, v in zip(headers, vals):
-                if h:
-                    stats[h] = v
+        headers = [_cell_text(th) for th in table.find_all("th")]
+        all_headers.append(headers)
+        rows = [[_cell_text(td) for td in tr.find_all("td")] for tr in table.find_all("tr")]
+        rows = [r for r in rows if r]
+        if "Date" in headers and "Fouls" in headers:
+            for r in rows:
+                game_log.append(dict(zip(headers, r)))
+        elif len(rows) == 1:
+            # one-row tables are summaries (games worked, tier, pay...);
+            # skip per-season breakdown columns like "2024-25"
+            for h, v in zip(headers, rows[0]):
+                if h and not re.match(r"^\d{4}-\d{2}$", h):
+                    summary.setdefault(h, v)
+
+    fouls = [p for p in (_parse_pair(g.get("Fouls", "")) for g in game_log) if p]
+    if fouls:
+        summary["Fouls/Game"] = f"{sum(a + b for a, b in fouls) / len(fouls):.1f}"
+        summary["Logged Games"] = str(len(fouls))
+    ou = [(g.get("O/U") or "").split(" ")[0].lower() for g in game_log]
+    overs, unders = ou.count("over"), ou.count("under")
+    if overs or unders:
+        summary["O/U Record (logged)"] = f"{overs} over / {unders} under"
+    return summary, game_log, all_headers
+
+
+def scrape_ref_profile(name: str, url: str, session: requests.Session,
+                       conn: sqlite3.Connection, scraped_at: str):
+    # Skip refs already scraped recently by this parser (game_log_json set).
+    cutoff = (datetime.now(DISPLAY_TZ) - timedelta(hours=PROFILE_REFRESH_HOURS)).isoformat(timespec="seconds")
+    if conn.execute("""
+        SELECT 1 FROM referee_stats
+        WHERE official_name = ? AND scraped_at >= ? AND game_log_json IS NOT NULL
+        LIMIT 1
+    """, (name, cutoff)).fetchone():
+        return
+
+    try:
+        r = session.get(url, timeout=8)
+    except requests.RequestException as e:
+        log.warning(f"Profile fetch failed for {name}: {e}")
+        return
+
+    summary, game_log, headers = parse_ref_profile(r.text)
+    if not game_log:
+        log.warning(f"  No game log on profile for {name}; table headers seen: {headers}")
 
     conn.execute("""
         INSERT INTO referee_stats
             (scraped_at, league, official_name, games, fouls_per_game,
-             techs, flagrants, raw_stats_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             techs, flagrants, raw_stats_json, game_log_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         scraped_at, "ncaa-men", name,
-        stats.get("Games", stats.get("Total Games", "")),
-        stats.get("Fouls/Game", stats.get("Avg Fouls", "")),
-        stats.get("Technicals", stats.get("Tech Fouls", "")),
-        stats.get("Flagrants", ""),
-        json.dumps(stats, ensure_ascii=False),
+        summary.get("Games", summary.get("Total Games", "")),
+        summary.get("Fouls/Game", ""),
+        summary.get("Technicals", summary.get("Tech Fouls", "")),
+        summary.get("Flagrants", ""),
+        json.dumps(summary, ensure_ascii=False),
+        json.dumps(game_log, ensure_ascii=False),
     ))
     conn.commit()
-    log.info(f"  -> {name}  fouls/g: {stats.get('Fouls/Game', 'n/a')}")
+    log.info(f"  -> {name}  fouls/g: {summary.get('Fouls/Game', 'n/a')} "
+             f"({len(game_log)} logged games)")
 
 
 def fetch_odds_events() -> list[dict]:
