@@ -68,21 +68,33 @@ def close_db(exc):
         db.close()
 
 
+_NCAA_CACHE_TTL = 120  # seconds
+_ncaa_cache: dict[str, tuple[float, list]] = {}
+
+
+def _cached_ncaa_scoreboard(ncaa_date: str) -> list:
+    """NCAA scoreboard for a date, cached briefly so page loads stay fast."""
+    import time
+    from refmetrics_scraper import fetch_ncaa_scoreboard
+    hit = _ncaa_cache.get(ncaa_date)
+    if hit and time.monotonic() - hit[0] < _NCAA_CACHE_TTL:
+        return hit[1]
+    try:
+        games = fetch_ncaa_scoreboard(ncaa_date, timeout=5)
+    except Exception:
+        games = []
+    _ncaa_cache.clear()  # only today's date is ever needed
+    _ncaa_cache[ncaa_date] = (time.monotonic(), games)
+    return games
+
+
 @app.route("/")
 def index():
     db = get_db()
     today = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
 
-    # Auto-fetch O/U lines and final scores
-    from refmetrics_scraper import update_odds, update_game_results
-    try:
-        update_odds(db)
-    except Exception as e:
-        log.warning(f"Odds update failed: {e}")
-    try:
-        update_game_results(db)
-    except Exception as e:
-        log.warning(f"Result update failed: {e}")
+    # O/U lines and final scores are fetched by the scraper every 10 minutes;
+    # doing it here on every page load made the page time out.
 
     # Fetch all games, grouped by date (today first, then descending)
     games = db.execute("""
@@ -146,12 +158,8 @@ def index():
 
     # Determine which games are finished using NCAA API scoreboard
     # Only fetch NCAA data for today's games (past dates are all completed)
-    from refmetrics_scraper import fetch_ncaa_scoreboard, _match_ncaa_game
-    ncaa_date = today.replace("-", "/")
-    try:
-        ncaa_games = fetch_ncaa_scoreboard(ncaa_date)
-    except Exception:
-        ncaa_games = []
+    from refmetrics_scraper import _match_ncaa_game
+    ncaa_games = _cached_ncaa_scoreboard(today.replace("-", "/"))
 
     ncaa_final_teams = set()
     for ng in ncaa_games:

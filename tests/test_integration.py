@@ -447,3 +447,33 @@ class TestUpdateLinesEndpoint:
 
         row = db.execute("SELECT * FROM game_analysis WHERE game_key = 'test_score'").fetchone()
         assert row["actual_total"] == 149
+
+
+# ── Homepage must not block on outside APIs ─────────────────────────────────
+
+class TestHomepageNoBlockingFetches:
+    """The homepage used to call the odds API and score feeds on every load,
+    which pushed it past gunicorn's 30s timeout."""
+
+    def test_homepage_skips_odds_and_results(self, client):
+        c, db = client
+        import app as app_module
+        app_module._ncaa_cache.clear()
+        with patch("refmetrics_scraper.update_odds") as odds, \
+             patch("refmetrics_scraper.update_game_results") as results, \
+             patch("refmetrics_scraper.fetch_ncaa_scoreboard", return_value=[]):
+            resp = c.get("/")
+        assert resp.status_code == 200
+        odds.assert_not_called()
+        results.assert_not_called()
+
+    def test_scoreboard_cached_between_loads(self, client):
+        c, db = client
+        import app as app_module
+        app_module._ncaa_cache.clear()
+        with patch("refmetrics_scraper.fetch_ncaa_scoreboard",
+                   return_value=[]) as sb:
+            assert c.get("/").status_code == 200
+            assert c.get("/").status_code == 200
+        assert sb.call_count == 1
+        assert sb.call_args.kwargs["timeout"] == 5

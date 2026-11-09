@@ -966,13 +966,13 @@ def update_odds(conn: sqlite3.Connection):
     return updated
 
 
-def fetch_ncaa_scoreboard(date_str: str) -> list[dict]:
+def fetch_ncaa_scoreboard(date_str: str, timeout: float = 15) -> list[dict]:
     """Fetch NCAA scoreboard for a date. Returns list of game dicts with scores and state.
     date_str format: 'YYYY/MM/DD'
     """
     url = f"{NCAA_API_SCOREBOARD}/{date_str}"
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=timeout)
         data = r.json()
     except Exception as e:
         log.warning(f"NCAA scoreboard fetch failed: {e}")
