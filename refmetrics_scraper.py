@@ -200,6 +200,11 @@ def init_db(db_path: str) -> sqlite3.Connection:
             raw_stats_json  TEXT
         )
     """)
+    # referee_stats is append-only; the homepage looks up each ref's latest row.
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_referee_stats_name_time
+        ON referee_stats (official_name, scraped_at)
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS referee_foul_leaders (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,

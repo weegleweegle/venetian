@@ -51,6 +51,14 @@ def _migrate_db(conn):
         conn.commit()
     except Exception:
         pass
+    try:
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_referee_stats_name_time
+            ON referee_stats (official_name, scraped_at)
+        """)
+        conn.commit()
+    except Exception:
+        pass
 
 
 def get_db():
