@@ -1314,10 +1314,90 @@ def _resolve_game_key(game: dict, conn: sqlite3.Connection, today_str: str) -> s
         return gk
 
 
+def _same_matchup(home_a: str, away_a: str, home_b: str, away_b: str) -> bool:
+    """True if two games are the same two teams, tolerating name formats
+    ('Portland St' vs 'Portland State Vikings') and swapped home/away."""
+    def m(x, y):
+        return bool(x and y and x.strip() and y.strip()) and fuzzy_match(x, y)
+    return ((m(home_a, home_b) and m(away_a, away_b)) or
+            (m(home_a, away_b) and m(away_a, home_b)))
+
+
+def remove_phantom_duplicates(conn: sqlite3.Connection) -> int:
+    """One-time cleanup: delete games that were re-saved the day after they
+    were played (see save_games_to_db). A row counts as a phantom when the
+    same matchup exists on the previous day and the row has no final score.
+    Analysis data only the phantom has is moved to the real game first."""
+    rows = conn.execute("""
+        SELECT gm.game_key, gm.game_date, gm.home_team, gm.away_team,
+               ga.actual_total
+        FROM game_assignments gm
+        LEFT JOIN game_analysis ga ON ga.game_key = gm.game_key
+        WHERE gm.game_date IS NOT NULL AND gm.game_date != ''
+    """).fetchall()
+    by_date: dict[str, list] = {}
+    for r in rows:
+        by_date.setdefault(r["game_date"], []).append(r)
+
+    removed = 0
+    deleted: set[str] = set()
+    for date_str, games in sorted(by_date.items()):
+        try:
+            prev = (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+        prev_games = by_date.get(prev, [])
+        for g in games:
+            if g["actual_total"] is not None:
+                continue
+            real = next((p for p in prev_games if p["game_key"] != g["game_key"] and
+                         p["game_key"] not in deleted and
+                         _same_matchup(g["home_team"], g["away_team"],
+                                       p["home_team"], p["away_team"])), None)
+            if not real:
+                continue
+            has_real_analysis = conn.execute(
+                "SELECT 1 FROM game_analysis WHERE game_key = ?", (real["game_key"],)
+            ).fetchone()
+            if has_real_analysis:
+                conn.execute("DELETE FROM game_analysis WHERE game_key = ?", (g["game_key"],))
+            else:
+                conn.execute("UPDATE game_analysis SET game_key = ? WHERE game_key = ?",
+                             (real["game_key"], g["game_key"]))
+            conn.execute("UPDATE OR IGNORE notifications_sent SET game_key = ? WHERE game_key = ?",
+                         (real["game_key"], g["game_key"]))
+            conn.execute("DELETE FROM notifications_sent WHERE game_key = ?", (g["game_key"],))
+            conn.execute("DELETE FROM game_assignments WHERE game_key = ?", (g["game_key"],))
+            deleted.add(g["game_key"])
+            log.info(f"Removed phantom {g['game_date']} {g['away_team']} @ {g['home_team']} "
+                     f"(real game: {real['game_date']} {real['game_key']})")
+            removed += 1
+    conn.commit()
+    log.info(f"Phantom cleanup: removed {removed} duplicate games.")
+    return removed
+
+
 def save_games_to_db(games: list[dict], conn: sqlite3.Connection):
     """Save all games to DB immediately so the dashboard can display them."""
     scraped_at = datetime.now(DISPLAY_TZ).isoformat(timespec="seconds")
     today_str  = datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d")
+
+    # Just after midnight the source pages can still list last night's games.
+    # Saving them under today's date created phantom duplicates that never
+    # got a final score, so skip any matchup already stored for yesterday.
+    yesterday_str = (datetime.now(DISPLAY_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday = conn.execute(
+        "SELECT home_team, away_team FROM game_assignments WHERE game_date = ?",
+        (yesterday_str,)
+    ).fetchall()
+    fresh = []
+    for game in games:
+        if any(_same_matchup(game["home"], game["away"], y["home_team"], y["away_team"])
+               for y in yesterday):
+            log.info(f"  Skipping {game['away']} @ {game['home']}: already saved for {yesterday_str}")
+        else:
+            fresh.append(game)
+    games = fresh
 
     for game in games:
         gk = _resolve_game_key(game, conn, today_str)
@@ -1491,6 +1571,15 @@ def main():
     log.info("Venetian — NCAA MBB Referee Tracker")
     log.info("Schedule: every 10 minutes")
     log.info("=" * 60)
+
+    # Clean up phantom duplicates left by the old after-midnight date bug.
+    # A no-op once they're gone, since save_games_to_db no longer creates them.
+    try:
+        conn = init_db(DB_PATH)
+        remove_phantom_duplicates(conn)
+        conn.close()
+    except Exception as e:
+        log.error(f"Phantom cleanup failed: {e}")
 
     # Run once immediately on startup
     try:
