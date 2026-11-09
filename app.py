@@ -52,6 +52,11 @@ def _migrate_db(conn):
     except Exception:
         pass
     try:
+        import history
+        history.ensure_tables(conn)
+    except Exception:
+        pass
+    try:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_referee_stats_name_time
             ON referee_stats (official_name, scraped_at)
@@ -651,6 +656,40 @@ def notify_slack(result: dict):
             log.warning(f"Slack webhook returned {r.status_code}")
     except Exception as e:
         log.warning(f"Slack notification failed: {e}")
+
+
+@app.route("/api/game/<path:game_key>/history")
+def game_history(game_key):
+    """Line movement, live score snapshots and box score for one game."""
+    import history
+    data = history.game_history(get_db(), game_key)
+    if data is None:
+        return jsonify({"error": "game not found"}), 404
+    return jsonify(data)
+
+
+@app.route("/api/export/games.csv")
+def export_games_csv():
+    """One row per game with opening/closing lines, final score and fouls.
+    ?start=YYYY-MM-DD&end=YYYY-MM-DD (defaults: last 30 days)."""
+    import csv
+    import io
+    import history
+    from flask import Response
+    today = datetime.now(DISPLAY_TZ)
+    start = request.args.get("start") or (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    end = request.args.get("end") or today.strftime("%Y-%m-%d")
+    for d in (start, end):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": f"bad date {d!r}, use YYYY-MM-DD"}), 400
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=history.EXPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(history.export_rows(get_db(), start, end))
+    return Response(buf.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": f"attachment; filename=games_{start}_to_{end}.csv"})
 
 
 @app.route("/api/refresh", methods=["POST"])

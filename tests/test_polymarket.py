@@ -3,6 +3,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 import refmetrics_scraper as rs
 
 
@@ -73,6 +75,11 @@ class TestFetch:
 
 
 class TestUpdateOdds:
+    @pytest.fixture(autouse=True)
+    def no_network(self):
+        with patch("refmetrics_scraper.fetch_odds_events", return_value=[]),              patch("refmetrics_scraper.fetch_polymarket_events", return_value=[]):
+            yield
+
     def _seed(self, db, key, date, home, away, ou=None):
         db.execute("""INSERT INTO game_assignments (game_key, game_date, game_time,
                       home_team, away_team) VALUES (?, ?, '7:00 PM', ?, ?)""",
@@ -99,7 +106,7 @@ class TestUpdateOdds:
         poly = {today: [("texas tech red raiders", "kansas jayhawks", 162.5)]}
         with patch("refmetrics_scraper.fetch_odds_totals",
                    return_value={"kansas jayhawks": 160.0}), \
-             patch("refmetrics_scraper.fetch_polymarket_totals", return_value=poly) as pm:
+             patch("refmetrics_scraper.fetch_polymarket_totals", return_value=poly):
             rs.update_odds(db)
+        # Polymarket runs too (for line history) but never overwrites a line
         assert db.execute("SELECT ou_line FROM game_analysis").fetchone()[0] == 160.0
-        pm.assert_not_called()  # nothing left missing, so no Polymarket call

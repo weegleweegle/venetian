@@ -104,5 +104,7 @@ def db():
     """, refs)
     conn.commit()
 
+    import history
+    history.ensure_tables(conn)
     yield conn
     conn.close()

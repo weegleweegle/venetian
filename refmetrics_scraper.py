@@ -214,6 +214,8 @@ def init_db(db_path: str) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_referee_stats_name_time
         ON referee_stats (official_name, scraped_at)
     """)
+    import history
+    history.ensure_tables(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS referee_foul_leaders (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -876,11 +878,11 @@ def scrape_ref_profile(name: str, url: str, session: requests.Session,
     log.info(f"  -> {name}  fouls/g: {stats.get('Fouls/Game', 'n/a')}")
 
 
-def fetch_odds_totals() -> dict:
-    """Fetch O/U lines from The Odds API. Returns {normalised_team_name: point}."""
+def fetch_odds_events() -> list[dict]:
+    """Raw NCAAB totals events from The Odds API (one call, metered)."""
     api_key = ODDS_API_KEY
     if not api_key:
-        return {}
+        return []
 
     try:
         url = ODDS_API_URL.format(api_key=api_key)
@@ -890,10 +892,17 @@ def fetch_odds_totals() -> dict:
         log.info(f"Odds API: fetched {len(data)} events ({remaining} requests remaining)")
     except Exception as e:
         log.warning(f"Odds API fetch failed: {e}")
-        return {}
+        return []
+    return data if isinstance(data, list) else []
+
+
+def fetch_odds_totals(events: list[dict] | None = None) -> dict:
+    """O/U lines from The Odds API. Returns {normalised_team_name: point}."""
+    if events is None:
+        events = fetch_odds_events()
 
     lines = {}
-    for event in data:
+    for event in events:
         home = event.get("home_team", "")
         away = event.get("away_team", "")
         # Use consensus from first bookmaker with a totals market
@@ -931,9 +940,10 @@ def _match_odds_line(team_name: str, lines: dict) -> float | None:
     return None
 
 
-def _polymarket_main_line(markets: list[dict]) -> float | None:
-    """Pick the main totals line: the open market whose Over price is closest
-    to 0.50. Returns None if no line is close enough to 50/50 to trust."""
+def _polymarket_main_market(markets: list[dict]) -> dict | None:
+    """Pick the main totals market: the open one whose Over price is closest
+    to 0.50. Returns {line, over_price, volume}, or None if no line is close
+    enough to 50/50 to trust."""
     best, best_skew = None, None
     for m in markets:
         if m.get("sportsMarketType") != "totals" or m.get("closed"):
@@ -948,19 +958,29 @@ def _polymarket_main_line(markets: list[dict]) -> float | None:
             continue
         skew = abs(over_price - 0.5)
         if best_skew is None or skew < best_skew:
-            best, best_skew = float(m["line"]), skew
+            try:
+                volume = float(m.get("volume") or 0)
+            except (TypeError, ValueError):
+                volume = 0.0
+            best = {"line": float(m["line"]), "over_price": over_price, "volume": volume}
+            best_skew = skew
     if best_skew is None or best_skew > POLYMARKET_MAX_SKEW:
         return None
     return best
 
 
-def fetch_polymarket_totals(now: datetime | None = None) -> dict:
-    """Fetch O/U lines from Polymarket for college basketball games that
-    haven't started yet. Returns {game_date: [(team_a, team_b, point), ...]}
-    with lowercase full team names and game_date as YYYY-MM-DD in DISPLAY_TZ."""
+def _polymarket_main_line(markets: list[dict]) -> float | None:
+    main = _polymarket_main_market(markets)
+    return main["line"] if main else None
+
+
+def fetch_polymarket_events(now: datetime | None = None) -> list[dict]:
+    """College basketball games on Polymarket that haven't started yet, each
+    with its main O/U line. Returns dicts with game_date (YYYY-MM-DD in
+    DISPLAY_TZ), team_a, team_b (lowercase full names), start (UTC ISO),
+    line, over_price and volume."""
     now = now or datetime.now(timezone.utc)
-    by_date: dict[str, list] = {}
-    found = 0
+    out = []
     for page in range(POLYMARKET_MAX_PAGES):
         try:
             r = requests.get(POLYMARKET_EVENTS_URL, timeout=15, params={
@@ -986,16 +1006,30 @@ def fetch_polymarket_totals(now: datetime | None = None) -> dict:
                 continue
             if start_dt <= now:
                 continue  # in-game prices don't reflect the pregame line
-            point = _polymarket_main_line(markets)
-            if point is None:
+            main = _polymarket_main_market(markets)
+            if main is None:
                 continue
-            game_date = start_dt.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d")
             team_a, team_b = (t.strip().lower() for t in title.split(" vs. ", 1))
-            by_date.setdefault(game_date, []).append((team_a, team_b, point))
-            found += 1
+            out.append({
+                "game_date": start_dt.astimezone(DISPLAY_TZ).strftime("%Y-%m-%d"),
+                "team_a": team_a, "team_b": team_b,
+                "start": start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                **main,
+            })
         if len(events) < 100:
             break
-    log.info(f"Polymarket: {found} upcoming games with O/U lines")
+    log.info(f"Polymarket: {len(out)} upcoming games with O/U lines")
+    return out
+
+
+def fetch_polymarket_totals(now: datetime | None = None,
+                            events: list[dict] | None = None) -> dict:
+    """O/U lines from Polymarket as {game_date: [(team_a, team_b, point), ...]}."""
+    if events is None:
+        events = fetch_polymarket_events(now)
+    by_date: dict[str, list] = {}
+    for e in events:
+        by_date.setdefault(e["game_date"], []).append((e["team_a"], e["team_b"], e["line"]))
     return by_date
 
 
@@ -1025,8 +1059,10 @@ def _match_polymarket_game(home: str, away: str, games: list) -> float | None:
 def update_odds(conn: sqlite3.Connection):
     """Fetch O/U lines and populate game_analysis.ou_line for any games missing lines.
     Creates minimal analysis rows for games that don't have one yet.
-    The Odds API is the main source; Polymarket fills in games it doesn't cover."""
-    odds_lines = fetch_odds_totals()
+    The Odds API is the main source; Polymarket fills in games it doesn't cover.
+    Every line seen from either source is also recorded in line_snapshots."""
+    odds_events = fetch_odds_events()
+    odds_lines = fetch_odds_totals(odds_events)
 
     def lookup_odds(row):
         return (_match_odds_line(row["home_team"], odds_lines)
@@ -1036,21 +1072,22 @@ def update_odds(conn: sqlite3.Connection):
     if odds_lines:
         updated += _apply_lines(conn, lookup_odds, "Odds API")
 
-    missing = conn.execute("""
-        SELECT COUNT(*) FROM game_assignments gm
-        LEFT JOIN game_analysis ga ON gm.game_key = ga.game_key
-        WHERE gm.game_date >= ?
-          AND (ga.id IS NULL OR ga.ou_line IS NULL OR ga.ou_line = 0)
-    """, (datetime.now(DISPLAY_TZ).strftime("%Y-%m-%d"),)).fetchone()[0]
-    if missing:
-        poly = fetch_polymarket_totals()
+    # Polymarket is free, so fetch it every cycle for the line history.
+    poly_events = fetch_polymarket_events()
+    poly = fetch_polymarket_totals(events=poly_events)
 
-        def lookup_poly(row):
-            return _match_polymarket_game(row["home_team"], row["away_team"],
-                                          poly.get(row["game_date"], []))
+    def lookup_poly(row):
+        return _match_polymarket_game(row["home_team"], row["away_team"],
+                                      poly.get(row["game_date"], []))
 
-        if poly:
-            updated += _apply_lines(conn, lookup_poly, "Polymarket")
+    if poly:
+        updated += _apply_lines(conn, lookup_poly, "Polymarket")
+
+    try:
+        import history
+        history.record_line_snapshots(conn, odds_events, poly_events)
+    except Exception as e:
+        log.warning(f"Line history failed: {e}")
     return updated
 
 
@@ -1138,6 +1175,8 @@ def fetch_ncaa_scoreboard(date_str: str, timeout: float = 15) -> list[dict]:
             "away_score": int(away_score_str) if away_score_str else None,
             "start_time": game.get("startTime", ""),
             "network": game.get("network", ""),
+            "period": game.get("currentPeriod", ""),
+            "clock": game.get("contestClock", ""),
         })
     return results
 
@@ -1560,6 +1599,14 @@ def scrape_cycle():
         update_game_results(conn)
     except Exception as e:
         log.warning(f"Score update failed: {e}")
+
+    # Score history (live games) and box scores (finished games)
+    try:
+        import history
+        history.update_score_history(conn)
+        history.store_box_scores(conn)
+    except Exception as e:
+        log.warning(f"History update failed: {e}")
 
     assigned = sum(1 for g in games if g["has_assignment"])
     log.info(f"Cycle complete: {len(games)} games, {assigned} with officials.")
